@@ -164,242 +164,7 @@ function setupReloadNotification(context: vscode.ExtensionContext): void {
   context.subscriptions.push(reloadWatcher);
 }
 
-function activateInner(context: vscode.ExtensionContext): void {
-  const extensionUri = context.extensionUri;
-
-  setupReloadNotification(context);
-
-  // ── Repo map tree ──
-  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
-  if (projectRoot) {
-    checkpointManager = new CheckpointManager(projectRoot);
-    diffReviewProvider = new DiffReviewProvider(projectRoot);
-    const treeProvider = new RepoMapTreeDataProvider(projectRoot);
-    const repoTree = vscode.window.createTreeView("dantecode.repoMap", {
-      treeDataProvider: treeProvider,
-    });
-    context.subscriptions.push(repoTree);
-  }
-
-  // ── Sidebar providers ──
-  chatSidebarProvider = new ChatSidebarProvider(
-    extensionUri,
-    context.secrets,
-    context.globalState,
-    {
-      onCostUpdate: ({ model, modelTier, sessionTotalUsd }) => {
-        if (!statusBarState) {
-          return;
-        }
-
-        updateStatusBar(statusBarState, model, statusBarState.gateStatus);
-        updateStatusBarWithCost(statusBarState, modelTier, sessionTotalUsd);
-      },
-      onDiffReview: ({ filePath, oldContent, newContent }) => {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        const resolvedPath =
-          workspaceRoot && !path.isAbsolute(filePath)
-            ? path.resolve(workspaceRoot, filePath)
-            : filePath;
-        setPendingDiff(resolvedPath, oldContent, newContent);
-      },
-      onModelChange: (model) => {
-        if (statusBarState) {
-          updateStatusBar(statusBarState, model, statusBarState.gateStatus);
-        }
-      },
-      onStatusBarUpdate: (info) => {
-        if (statusBarState) {
-          updateStatusBarInfo(statusBarState, info);
-        }
-      },
-      onCircuitStateChange: (isOpen) => {
-        updateCircuitBreakerBar(isOpen);
-      },
-    },
-  );
-  const chatViewRegistration = vscode.window.registerWebviewViewProvider(
-    ChatSidebarProvider.viewType,
-    chatSidebarProvider,
-    { webviewOptions: { retainContextWhenHidden: true } },
-  );
-  context.subscriptions.push(chatViewRegistration);
-
-  auditPanelProvider = new AuditPanelProvider(extensionUri);
-  const auditViewRegistration = vscode.window.registerWebviewViewProvider(
-    AuditPanelProvider.viewType,
-    auditPanelProvider,
-    { webviewOptions: { retainContextWhenHidden: true } },
-  );
-  context.subscriptions.push(auditViewRegistration);
-
-  // ── Completion telemetry + acceptance tracking ──
-  completionTelemetry = new CompletionTelemetryService(
-    path.join(context.globalStorageUri.fsPath, "telemetry"),
-  );
-  completionAcceptanceTracker = new CompletionAcceptanceTracker(completionTelemetry);
-  context.subscriptions.push(completionAcceptanceTracker);
-
-  // ── FIM model router (connection reuse + Ollama auto-detect) ──
-  const config = vscode.workspace.getConfiguration("dantecode");
-  fimModelRouter = new FimModelRouter();
-  fimModelRouter.startHealthProbe({
-    ollamaUrl: config.get<string>("fimOllamaUrl", "http://localhost:11434"),
-    localModel: config.get<string>("fimLocalModel", ""),
-    autoDetect: config.get<boolean>("fimOllamaAutoDetect", true),
-  });
-
-  // ── FIM latency tracker (p50/p95 status bar) ──
-  fimLatencyTracker = new FimLatencyTracker(completionTelemetry);
-
-  // ── Next-Edit Prediction (edit history ring + heuristic predictor) ──
-  editHistoryTracker = new EditHistoryTracker(50);
-  nextEditPredictor = new NextEditPredictor(editHistoryTracker);
-
-  // ── Test framework detector (framework detection + test file finder) ──
-  testFrameworkDetector = new TestFrameworkDetector();
-
-  // ── BM25 context retriever (wired to codebase index if available) ──
-  const contextRetriever = new CompletionContextRetriever(() => {
-    if (!codebaseIndexManager) return [];
-    return codebaseIndexManager.getChunks();
-  });
-
-  // Wire BM25 into sidebar chat — same retriever used by inline-completion
-  chatSidebarProvider?.setContextRetriever(contextRetriever);
-
-  // ── LSP diagnostics injector (wires real-time errors/warnings into FIM context + sidebar chat) ──
-  const lspDiagnosticsInjector = new LspDiagnosticsInjector(vscode);
-  // Wire into sidebar chat so the model sees live errors/warnings on every request (dim 2)
-  chatSidebarProvider?.setLspInjector(lspDiagnosticsInjector);
-
-  // ── Inline completion ──
-  completionProvider = new DanteCodeCompletionProvider(context, {
-    acceptanceTracker: completionAcceptanceTracker,
-    telemetry: completionTelemetry,
-    contextRetriever,
-    fimModelRouter,
-    latencyTracker: fimLatencyTracker,
-    nextEditPredictor,
-    codebaseIndexManager: codebaseIndexManager ?? undefined,
-    lspInjector: lspDiagnosticsInjector,
-  });
-  const completionRegistration = vscode.languages.registerInlineCompletionItemProvider(
-    { pattern: "**" },
-    completionProvider,
-  );
-  context.subscriptions.push(completionRegistration);
-
-  // Track recently-edited files for completion context injection
-  context.subscriptions.push(
-    vscode.workspace.onDidChangeTextDocument((e) => {
-      if (e.document.uri.scheme === "file") {
-        completionProvider?.recordRecentEdit(e.document.uri.fsPath);
-      }
-    }),
-  );
-
-  // ── Real-time DanteCode diagnostics — as-you-type underlines (dim 2) ──
-  // 300ms debounce mirrors VS Code's own TS pull-diagnostic cadence.
-  // Forwards error-level LSP diagnostics into a named DanteCode collection so
-  // the user sees "[DC]" tagged squiggles driven by the workspace TS server.
-  danteDiagnostics = vscode.languages.createDiagnosticCollection("dantecode-live");
-  context.subscriptions.push(danteDiagnostics);
-  {
-    let diagDebounce: ReturnType<typeof setTimeout> | undefined;
-    context.subscriptions.push(
-      vscode.workspace.onDidChangeTextDocument((e) => {
-        if (e.document.uri.scheme !== "file") return;
-        if (!/\.(ts|tsx|js|jsx|py)$/.test(e.document.fileName)) return;
-        clearTimeout(diagDebounce);
-        diagDebounce = setTimeout(() => {
-          try {
-            const existing = vscode.languages.getDiagnostics(e.document.uri);
-            const errors = existing
-              .filter((d) => d.severity === vscode.DiagnosticSeverity.Error)
-              .map(
-                (d) =>
-                  new vscode.Diagnostic(
-                    d.range,
-                    `[DC] ${d.message}`,
-                    vscode.DiagnosticSeverity.Error,
-                  ),
-              );
-            danteDiagnostics!.set(e.document.uri, errors.length > 0 ? errors : []);
-          } catch {
-            /* non-fatal — diagnostic refresh is best-effort */
-          }
-        }, 300);
-      }),
-    );
-  }
-
-  // Internal acceptance tracking command (fired by InlineCompletionItem.command)
-  context.subscriptions.push(
-    vscode.commands.registerCommand("dantecode._internalTrackAccept", (completionId: string) => {
-      completionAcceptanceTracker?.trackAccepted(completionId);
-    }),
-  );
-
-  // ── Status bar ──
-  statusBarState = createStatusBar(context);
-  updateStatusBar(statusBarState, DEFAULT_MODEL_ID, "none");
-
-  // ── Circuit breaker status bar indicator (dim 24) ──
-  createCircuitBreakerBar(context);
-
-  // ── Diagnostics ──
-  diagnosticProvider = new PDSEDiagnosticProvider();
-  context.subscriptions.push(diagnosticProvider);
-
-  // ── CodeLens provider ──
-  {
-    codeLensProvider = new DanteCodeLensProvider();
-    context.subscriptions.push(
-      vscode.languages.registerCodeLensProvider(
-        ["typescript", "javascript", "typescriptreact", "javascriptreact", "python", "go"],
-        codeLensProvider,
-      ),
-      // Refresh code lenses when the document changes
-      vscode.workspace.onDidChangeTextDocument(() => {
-        codeLensProvider?.scheduleRefresh();
-      }),
-    );
-  }
-
-  // ── Quick Fix provider ──
-  context.subscriptions.push(
-    vscode.languages.registerCodeActionsProvider(
-      ["typescript", "javascript", "typescriptreact", "javascriptreact"],
-      new DanteCodeQuickFixProvider(),
-      { providedCodeActionKinds: DanteCodeQuickFixProvider.providedCodeActionKinds },
-    ),
-  );
-
-  // ── Inline Edit provider (Cmd+I / Ctrl+I) ──
-  inlineEditProvider = new InlineEditProvider(
-    context,
-    checkpointManager,
-    async (system, user) => {
-      // Use ModelRouterImpl to call the model — same as the chat sidebar.
-      const modelId = vscode.workspace
-        .getConfiguration("dantecode")
-        .get<string>("defaultModel") ?? "claude-sonnet-4-6";
-      const { ModelRouterImpl } = await import("@dantecode/core");
-      const modelConfig = { provider: "anthropic" as const, modelId, maxTokens: 4096, temperature: 0.1, contextWindow: 200000, supportsVision: false, supportsToolCalls: false };
-      const routerConfig = { default: modelConfig, fallback: [], overrides: {} as Record<string, typeof modelConfig> };
-      const router = new ModelRouterImpl(routerConfig, projectRoot ?? "", "inline-edit");
-      return router.generate(
-        [{ role: "user" as const, content: user }],
-        { system, maxTokens: 4096 },
-      );
-    },
-  );
-  context.subscriptions.push(...inlineEditProvider.activate());
-
-  // ── Context providers: VS Code-specific (@terminal, @selection) ──
-  // Note: @problems is now handled by ProblemsProvider (Machine 2)
-
+function registerSelectionContextProvider(): void {
   globalContextRegistry.register({
     name: "selection",
     trigger: "@selection",
@@ -421,39 +186,9 @@ function activateInner(context: vscode.ExtensionContext): void {
       }];
     },
   });
+}
 
-  // ── Terminal output capture ───────────────────────────────────────────────
-  terminalOutputManager = new TerminalOutputManager();
-  // onDidWriteTerminalData is a PROPOSED API (terminalDataWriteEvent). The
-  // function exists in Antigravity/VSCode but CALLING it throws unless the
-  // extension declares the proposal in package.json#enabledApiProposals AND
-  // the editor was launched with --enable-proposed-api dantecode.dantecode.
-  // We don't want to require the user to launch with that flag, so wrap the
-  // call in try/catch — terminal-output capture is a nice-to-have, not core.
-  // This regression has happened before (memory: "terminal API try/catch"
-  // was a documented activation-blocker fix).
-  try {
-    const windowAny = vscode.window as unknown as Record<string, unknown>;
-    if (typeof windowAny["onDidWriteTerminalData"] === "function") {
-      const onData = windowAny["onDidWriteTerminalData"] as (
-        handler: (e: { terminal: { name: string }; data: string }) => void,
-      ) => vscode.Disposable;
-      context.subscriptions.push(
-        onData((e) => terminalOutputManager!.onData(e)),
-      );
-    }
-  } catch (terminalApiErr) {
-    // Proposed-API not enabled. Log and continue — the rest of the extension
-    // works fine without terminal-output capture.
-    try {
-      const fs = require("fs") as typeof import("fs");
-      fs.appendFileSync(
-        "C:/tmp/dante-bypass.log",
-        `[${new Date().toISOString()}] terminal-data API unavailable (proposal not enabled): ${String(terminalApiErr)}\n`,
-      );
-    } catch { /* ignore */ }
-  }
-
+function registerTerminalContextProvider(): void {
   globalContextRegistry.register({
     name: "terminal",
     trigger: "@terminal",
@@ -478,106 +213,250 @@ function activateInner(context: vscode.ExtensionContext): void {
       }];
     },
   });
+}
 
-  // Wire terminal manager into sidebar for test-failure auto-fix
-  chatSidebarProvider?.setTerminalOutputManager(terminalOutputManager);
-
-  // ── Codebase index manager + @codebase context provider ─────────────────────
-  if (projectRoot) {
-    codebaseIndexManager = new CodebaseIndexManager(projectRoot);
-    setCodebaseIndexManager(codebaseIndexManager);
-
-    globalContextRegistry.register({
-      name: "codebase",
-      trigger: "@codebase",
-      description: "Semantic search across the entire codebase",
-      async resolve(query: string, _workspace: string): Promise<ContextItem[]> {
-        if (!codebaseIndexManager) return [];
-        const raw = await codebaseIndexManager.search(query || "");
-        const chunks = raw as Array<{
-          filePath: string;
-          startLine: number;
-          endLine: number;
-          content: string;
-          symbols: string[];
-        }>;
-        return [
-          {
-            type: "codebase",
-            label: `@codebase:${query || ""}`,
-            content:
-              chunks.length === 0
-                ? "(codebase index not ready — will be available shortly)"
-                : formatChunks(chunks),
-          },
-        ];
-      },
-    });
-
-    // Background index build — non-blocking; activate() returns immediately
-    void codebaseIndexManager.initialize();
-
-    // Pre-embed corpus for semantic retrieval warmup — Tabby pattern (dim 3+4)
-    // After warmup, report FIM P50 latency to output channel (dim 1).
-    // danteOutputChannel is populated after this block — captured via closure.
-    void contextRetriever.warmup(projectRoot).then(() => {
-      const p50 = fimLatencyTracker?.reportP50(danteOutputChannel ?? undefined);
-      void p50; // value surfaced via outputChannel.appendLine
-    }).catch(() => {});
-
-    // ── Test decoration manager — gutter icons for pass/fail (dim 19) ──
-    testDecoManager = createTestDecorationManager();
-    context.subscriptions.push({ dispose: () => testDecoManager?.dispose() });
-
-    // Incremental reindex on file save (300ms debounced inside manager)
-    // Also apply test decorations when vitest results file is present (dim 19)
-    context.subscriptions.push(
-      vscode.workspace.onDidSaveTextDocument(async (doc) => {
-        if (doc.uri.scheme === "file") {
-          codebaseIndexManager?.onFileSaved(doc.uri.fsPath);
-          // Apply test gutter decorations for TS/JS source files on save
-          if (/\.(ts|tsx|js|jsx)$/.test(doc.fileName)) {
-            const resultsPath = path.join(projectRoot, ".dantecode", "test-results.json");
-            try {
-              const raw = await readFile(resultsPath, "utf8");
-              testDecoManager?.apply(parseVitestResults(raw));
-            } catch {
-              // No results file yet — silently skip
-            }
-          }
-          // Dim 14 — auto-refresh preview panel on relevant file saves (debounced 300ms)
-          if (activePreviewPort > 0 && /\.(ts|tsx|js|jsx|css|html)$/.test(doc.fileName)) {
-            if (previewRefreshTimer) clearTimeout(previewRefreshTimer);
-            previewRefreshTimer = setTimeout(() => {
-              PreviewPanelProvider.refresh(activePreviewPort);
-              previewRefreshTimer = null;
-            }, 300);
-          }
-        }
-      }),
-    );
-
-    // Status bar: reflect index state
-    if (statusBarState) {
-      codebaseIndexManager.onStateChange((state, count) => {
-        setIndexState(
-          statusBarState!,
-          state === "indexing" ? "indexing" : state === "ready" ? "ready" : "none",
-          count,
-        );
-      });
+function setupTerminalCapture(context: vscode.ExtensionContext): void {
+  // onDidWriteTerminalData is a PROPOSED API (terminalDataWriteEvent). The
+  // function exists in Antigravity/VSCode but CALLING it throws unless the
+  // extension declares the proposal in package.json#enabledApiProposals AND
+  // the editor was launched with --enable-proposed-api dantecode.dantecode.
+  // We don't want to require the user to launch with that flag, so wrap the
+  // call in try/catch — terminal-output capture is a nice-to-have, not core.
+  // Regression history: "terminal API try/catch" was a documented
+  // activation-blocker fix.
+  try {
+    const windowAny = vscode.window as unknown as Record<string, unknown>;
+    if (typeof windowAny["onDidWriteTerminalData"] === "function") {
+      const onData = windowAny["onDidWriteTerminalData"] as (
+        handler: (e: { terminal: { name: string }; data: string }) => void,
+      ) => vscode.Disposable;
+      context.subscriptions.push(
+        onData((e) => terminalOutputManager!.onData(e)),
+      );
     }
+  } catch (terminalApiErr) {
+    // Proposed-API not enabled. Log and continue — the rest of the extension
+    // works fine without terminal-output capture.
+    try {
+      const fs = require("fs") as typeof import("fs");
+      fs.appendFileSync(
+        "C:/tmp/dante-bypass.log",
+        `[${new Date().toISOString()}] terminal-data API unavailable (proposal not enabled): ${String(terminalApiErr)}\n`,
+      );
+    } catch { /* ignore */ }
   }
+}
 
-  // ── Debug Attach Provider ──
+function registerCodebaseContextProvider(): void {
+  globalContextRegistry.register({
+    name: "codebase",
+    trigger: "@codebase",
+    description: "Semantic search across the entire codebase",
+    async resolve(query: string, _workspace: string): Promise<ContextItem[]> {
+      if (!codebaseIndexManager) return [];
+      const raw = await codebaseIndexManager.search(query || "");
+      const chunks = raw as Array<{
+        filePath: string;
+        startLine: number;
+        endLine: number;
+        content: string;
+        symbols: string[];
+      }>;
+      return [
+        {
+          type: "codebase",
+          label: `@codebase:${query || ""}`,
+          content:
+            chunks.length === 0
+              ? "(codebase index not ready — will be available shortly)"
+              : formatChunks(chunks),
+        },
+      ];
+    },
+  });
+}
+
+function wireFileSaveHandlers(context: vscode.ExtensionContext, projectRoot: string): void {
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument(async (doc) => {
+      if (doc.uri.scheme !== "file") return;
+      codebaseIndexManager?.onFileSaved(doc.uri.fsPath);
+      // Apply test gutter decorations for TS/JS source files on save
+      if (/\.(ts|tsx|js|jsx)$/.test(doc.fileName)) {
+        const resultsPath = path.join(projectRoot, ".dantecode", "test-results.json");
+        try {
+          const raw = await readFile(resultsPath, "utf8");
+          testDecoManager?.apply(parseVitestResults(raw));
+        } catch {
+          // No results file yet — silently skip
+        }
+      }
+      // Dim 14 — auto-refresh preview panel on relevant file saves (debounced 300ms)
+      if (activePreviewPort > 0 && /\.(ts|tsx|js|jsx|css|html)$/.test(doc.fileName)) {
+        if (previewRefreshTimer) clearTimeout(previewRefreshTimer);
+        previewRefreshTimer = setTimeout(() => {
+          PreviewPanelProvider.refresh(activePreviewPort);
+          previewRefreshTimer = null;
+        }, 300);
+      }
+    }),
+  );
+}
+
+function setupCodebaseIndex(
+  context: vscode.ExtensionContext,
+  projectRoot: string,
+  contextRetriever: CompletionContextRetriever,
+): void {
+  if (!projectRoot) return;
+  codebaseIndexManager = new CodebaseIndexManager(projectRoot);
+  setCodebaseIndexManager(codebaseIndexManager);
+  registerCodebaseContextProvider();
+
+  // Background index build — non-blocking; activate() returns immediately
+  void codebaseIndexManager.initialize();
+
+  // Pre-embed corpus for semantic retrieval warmup — Tabby pattern (dim 3+4).
+  // After warmup, report FIM P50 latency to output channel (dim 1).
+  void contextRetriever.warmup(projectRoot).then(() => {
+    const p50 = fimLatencyTracker?.reportP50(danteOutputChannel ?? undefined);
+    void p50;
+  }).catch(() => {});
+
+  // Test decoration manager — gutter icons for pass/fail (dim 19)
+  testDecoManager = createTestDecorationManager();
+  context.subscriptions.push({ dispose: () => testDecoManager?.dispose() });
+
+  // Incremental reindex + test decorations + preview refresh on save
+  wireFileSaveHandlers(context, projectRoot);
+
+  // Status bar: reflect index state
+  if (statusBarState) {
+    codebaseIndexManager.onStateChange((state, count) => {
+      setIndexState(
+        statusBarState!,
+        state === "indexing" ? "indexing" : state === "ready" ? "ready" : "none",
+        count,
+      );
+    });
+  }
+}
+
+function setupVSCodeContextProviders(context: vscode.ExtensionContext): void {
+  registerSelectionContextProvider();
+  terminalOutputManager = new TerminalOutputManager();
+  setupTerminalCapture(context);
+  registerTerminalContextProvider();
+}
+
+function setupRealtimeDiagnostics(context: vscode.ExtensionContext): void {
+  // 300ms debounce mirrors VS Code's own TS pull-diagnostic cadence.
+  // Forwards error-level LSP diagnostics into a named DanteCode collection so
+  // the user sees "[DC]" tagged squiggles driven by the workspace TS server.
+  danteDiagnostics = vscode.languages.createDiagnosticCollection("dantecode-live");
+  context.subscriptions.push(danteDiagnostics);
+  let diagDebounce: ReturnType<typeof setTimeout> | undefined;
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument((e) => {
+      if (e.document.uri.scheme !== "file") return;
+      if (!/\.(ts|tsx|js|jsx|py)$/.test(e.document.fileName)) return;
+      clearTimeout(diagDebounce);
+      diagDebounce = setTimeout(() => {
+        try {
+          const existing = vscode.languages.getDiagnostics(e.document.uri);
+          const errors = existing
+            .filter((d) => d.severity === vscode.DiagnosticSeverity.Error)
+            .map(
+              (d) =>
+                new vscode.Diagnostic(
+                  d.range,
+                  `[DC] ${d.message}`,
+                  vscode.DiagnosticSeverity.Error,
+                ),
+            );
+          danteDiagnostics!.set(e.document.uri, errors.length > 0 ? errors : []);
+        } catch {
+          /* non-fatal — diagnostic refresh is best-effort */
+        }
+      }, 300);
+    }),
+  );
+}
+
+function setupCodeIntelligenceProviders(context: vscode.ExtensionContext): void {
+  // PDSE diagnostics
+  diagnosticProvider = new PDSEDiagnosticProvider();
+  context.subscriptions.push(diagnosticProvider);
+
+  // CodeLens — refresh on document change
+  codeLensProvider = new DanteCodeLensProvider();
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider(
+      ["typescript", "javascript", "typescriptreact", "javascriptreact", "python", "go"],
+      codeLensProvider,
+    ),
+    vscode.workspace.onDidChangeTextDocument(() => {
+      codeLensProvider?.scheduleRefresh();
+    }),
+  );
+
+  // Quick Fix — TS/JS only
+  context.subscriptions.push(
+    vscode.languages.registerCodeActionsProvider(
+      ["typescript", "javascript", "typescriptreact", "javascriptreact"],
+      new DanteCodeQuickFixProvider(),
+      { providedCodeActionKinds: DanteCodeQuickFixProvider.providedCodeActionKinds },
+    ),
+  );
+}
+
+function setupCompletionInfra(context: vscode.ExtensionContext): void {
+  // Telemetry + acceptance tracking
+  completionTelemetry = new CompletionTelemetryService(
+    path.join(context.globalStorageUri.fsPath, "telemetry"),
+  );
+  completionAcceptanceTracker = new CompletionAcceptanceTracker(completionTelemetry);
+  context.subscriptions.push(completionAcceptanceTracker);
+
+  // FIM model router (connection reuse + Ollama auto-detect)
+  const config = vscode.workspace.getConfiguration("dantecode");
+  fimModelRouter = new FimModelRouter();
+  fimModelRouter.startHealthProbe({
+    ollamaUrl: config.get<string>("fimOllamaUrl", "http://localhost:11434"),
+    localModel: config.get<string>("fimLocalModel", ""),
+    autoDetect: config.get<boolean>("fimOllamaAutoDetect", true),
+  });
+
+  // FIM latency tracker (p50/p95 status bar)
+  fimLatencyTracker = new FimLatencyTracker(completionTelemetry);
+
+  // Next-Edit Prediction (edit history ring + heuristic predictor)
+  editHistoryTracker = new EditHistoryTracker(50);
+  nextEditPredictor = new NextEditPredictor(editHistoryTracker);
+
+  // Test framework detector (framework detection + test file finder)
+  testFrameworkDetector = new TestFrameworkDetector();
+}
+
+function setupRepoMapTree(context: vscode.ExtensionContext, projectRoot: string): void {
+  if (!projectRoot) return;
+  checkpointManager = new CheckpointManager(projectRoot);
+  diffReviewProvider = new DiffReviewProvider(projectRoot);
+  const treeProvider = new RepoMapTreeDataProvider(projectRoot);
+  const repoTree = vscode.window.createTreeView("dantecode.repoMap", {
+    treeDataProvider: treeProvider,
+  });
+  context.subscriptions.push(repoTree);
+}
+
+function setupDebugAttach(context: vscode.ExtensionContext): void {
   const debugAttachProvider = new DebugAttachProvider();
   const debugDisposables = debugAttachProvider.activate(context);
   context.subscriptions.push(...debugDisposables, debugAttachProvider);
   chatSidebarProvider?.setDebugAttachProvider(debugAttachProvider);
+}
 
-  // ── Context providers: @clipboard, @repo-map ─────────────────────────
-  // Note: @open is now handled by OpenFilesProvider (Machine 2)
-
+function registerClipboardAndRepoMapProviders(): void {
   globalContextRegistry.register({
     name: "clipboard",
     trigger: "@clipboard",
@@ -603,22 +482,24 @@ function activateInner(context: vscode.ExtensionContext): void {
       return [{ type: "codebase" as const, label: "@repo-map", content: map || "(repo map unavailable)" }];
     },
   });
+}
 
-  // ── LSP context providers: @hover, @definition, @references, @symbol, @types ─
+function registerLspContextProviders(): void {
   globalContextRegistry.register(HOVER_PROVIDER);
   globalContextRegistry.register(DEFINITION_PROVIDER);
   globalContextRegistry.register(REFERENCES_PROVIDER);
   globalContextRegistry.register(SYMBOL_PROVIDER);
   globalContextRegistry.register(TYPES_PROVIDER);
+}
 
-  // ── Machine 2: Formalized context providers ───────────────────────────────
-  const _newProviders = [
+function registerMachine2ContextProviders(): void {
+  const newProviders = [
     new CurrentFileProvider(),
     new OpenFilesProvider(),
     new ProblemsProvider(),
     new UrlProvider(),
   ];
-  for (const p of _newProviders) {
+  for (const p of newProviders) {
     globalCoreRegistry.register(p);
     globalContextRegistry.register({
       name: p.name,
@@ -635,6 +516,283 @@ function activateInner(context: vscode.ExtensionContext): void {
       },
     });
   }
+}
+
+function registerExtraContextProviders(): void {
+  registerClipboardAndRepoMapProviders();
+  registerLspContextProviders();
+  registerMachine2ContextProviders();
+}
+
+function buildSidebarCallbacks(): {
+  onCostUpdate: (info: { model: string; modelTier: "fast" | "capable"; sessionTotalUsd: number }) => void;
+  onDiffReview: (info: { filePath: string; oldContent: string; newContent: string }) => void;
+  onModelChange: (model: string) => void;
+  onStatusBarUpdate: (info: import("./status-bar.js").StatusBarInfo) => void;
+  onCircuitStateChange: (isOpen: boolean) => void;
+} {
+  return {
+    onCostUpdate: ({ model, modelTier, sessionTotalUsd }) => {
+      if (!statusBarState) return;
+      updateStatusBar(statusBarState, model, statusBarState.gateStatus);
+      updateStatusBarWithCost(statusBarState, modelTier, sessionTotalUsd);
+    },
+    onDiffReview: ({ filePath, oldContent, newContent }) => {
+      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const resolvedPath =
+        workspaceRoot && !path.isAbsolute(filePath)
+          ? path.resolve(workspaceRoot, filePath)
+          : filePath;
+      setPendingDiff(resolvedPath, oldContent, newContent);
+    },
+    onModelChange: (model) => {
+      if (statusBarState) updateStatusBar(statusBarState, model, statusBarState.gateStatus);
+    },
+    onStatusBarUpdate: (info) => {
+      if (statusBarState) updateStatusBarInfo(statusBarState, info);
+    },
+    onCircuitStateChange: (isOpen) => {
+      updateCircuitBreakerBar(isOpen);
+    },
+  };
+}
+
+function setupSidebarProviders(context: vscode.ExtensionContext, extensionUri: vscode.Uri): void {
+  chatSidebarProvider = new ChatSidebarProvider(
+    extensionUri,
+    context.secrets,
+    context.globalState,
+    buildSidebarCallbacks(),
+  );
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      ChatSidebarProvider.viewType,
+      chatSidebarProvider,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    ),
+  );
+
+  auditPanelProvider = new AuditPanelProvider(extensionUri);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      AuditPanelProvider.viewType,
+      auditPanelProvider,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    ),
+  );
+}
+
+function setupInlineCompletionStack(context: vscode.ExtensionContext): CompletionContextRetriever {
+  // BM25 context retriever (wired to codebase index if available)
+  const contextRetriever = new CompletionContextRetriever(() => {
+    if (!codebaseIndexManager) return [];
+    return codebaseIndexManager.getChunks();
+  });
+  chatSidebarProvider?.setContextRetriever(contextRetriever);
+
+  // LSP diagnostics injector — live errors/warnings into FIM + sidebar chat
+  const lspDiagnosticsInjector = new LspDiagnosticsInjector(vscode);
+  chatSidebarProvider?.setLspInjector(lspDiagnosticsInjector);
+
+  // Inline completion
+  completionProvider = new DanteCodeCompletionProvider(context, {
+    acceptanceTracker: completionAcceptanceTracker,
+    telemetry: completionTelemetry,
+    contextRetriever,
+    fimModelRouter,
+    latencyTracker: fimLatencyTracker,
+    nextEditPredictor,
+    codebaseIndexManager: codebaseIndexManager ?? undefined,
+    lspInjector: lspDiagnosticsInjector,
+  });
+  context.subscriptions.push(
+    vscode.languages.registerInlineCompletionItemProvider({ pattern: "**" }, completionProvider),
+    // Track recently-edited files for completion context injection
+    vscode.workspace.onDidChangeTextDocument((e) => {
+      if (e.document.uri.scheme === "file") {
+        completionProvider?.recordRecentEdit(e.document.uri.fsPath);
+      }
+    }),
+  );
+  return contextRetriever;
+}
+
+function setupInlineEditProvider(context: vscode.ExtensionContext, projectRoot: string): void {
+  inlineEditProvider = new InlineEditProvider(
+    context,
+    checkpointManager,
+    async (system, user) => {
+      // Use ModelRouterImpl to call the model — same as the chat sidebar.
+      const modelId = vscode.workspace
+        .getConfiguration("dantecode")
+        .get<string>("defaultModel") ?? "claude-sonnet-4-6";
+      const { ModelRouterImpl } = await import("@dantecode/core");
+      const modelConfig = {
+        provider: "anthropic" as const,
+        modelId,
+        maxTokens: 4096,
+        temperature: 0.1,
+        contextWindow: 200000,
+        supportsVision: false,
+        supportsToolCalls: false,
+      };
+      const routerConfig = {
+        default: modelConfig,
+        fallback: [],
+        overrides: {} as Record<string, typeof modelConfig>,
+      };
+      const router = new ModelRouterImpl(routerConfig, projectRoot ?? "", "inline-edit");
+      return router.generate(
+        [{ role: "user" as const, content: user }],
+        { system, maxTokens: 4096 },
+      );
+    },
+  );
+  context.subscriptions.push(...inlineEditProvider.activate());
+}
+
+async function semanticGoToDefinitionHandler(): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) return;
+  const pos = editor.selection.active;
+  const wordRange = editor.document.getWordRangeAtPosition(pos);
+  const symbol = wordRange ? editor.document.getText(wordRange) : "";
+  if (!symbol) return;
+
+  // 1. Try native LSP definition provider first
+  try {
+    const lspResults = await vscode.commands.executeCommand<vscode.Location[]>(
+      "vscode.executeDefinitionProvider",
+      editor.document.uri,
+      pos,
+    );
+    if (lspResults && lspResults.length > 0) {
+      await vscode.commands.executeCommand("editor.action.revealDefinition");
+      return;
+    }
+  } catch {
+    /* LSP unavailable — fall through to semantic search */
+  }
+
+  // 2. Fallback: semantic search via codebase index (dim 4 gap-closer)
+  if (!codebaseIndexManager) {
+    void vscode.window.showInformationMessage(
+      "DanteCode: Codebase index not ready — try again in a moment",
+    );
+    return;
+  }
+  const rawHits = await codebaseIndexManager.search(symbol, 3);
+  const hits = rawHits as Array<{ filePath: string; startLine?: number; content: string }>;
+  if (hits.length === 0) {
+    void vscode.window.showInformationMessage(
+      `DanteCode: No semantic matches found for "${symbol}"`,
+    );
+    return;
+  }
+
+  const items = hits.map((h) => ({
+    label: path.basename(h.filePath),
+    description: `${h.filePath}:${h.startLine ?? 1}`,
+    detail: (h.content.split("\n")[0] ?? "").slice(0, 80),
+    filePath: h.filePath,
+    startLine: Math.max(0, (h.startLine ?? 1) - 1),
+  }));
+
+  const picked = await vscode.window.showQuickPick(items, {
+    title: `Semantic go-to-definition: ${symbol}`,
+    placeHolder: "Select result to navigate",
+    matchOnDescription: true,
+    matchOnDetail: true,
+  });
+  if (!picked) return;
+
+  const uri = vscode.Uri.file(picked.filePath);
+  await vscode.window.showTextDocument(uri, {
+    selection: new vscode.Range(picked.startLine, 0, picked.startLine, 0),
+  });
+}
+
+function registerSemanticGoToDefinition(context: vscode.ExtensionContext): void {
+  // Falls back from native LSP → embedding-based codebase search when LSP returns nothing.
+  context.subscriptions.push(
+    vscode.commands.registerCommand("dantecode.semanticGoToDefinition", semanticGoToDefinitionHandler),
+  );
+}
+
+async function runEnterpriseSSOCheck(outputChannel: vscode.OutputChannel): Promise<void> {
+  // SSO gate (dim 28): check ssoConfig workspace setting on activation. If
+  // configured, surface domain in output channel and update status bar.
+  try {
+    const ssoRaw = vscode.workspace.getConfiguration("dantecode").get<{
+      domain?: string;
+      provider?: string;
+      entityId?: string;
+      acsUrl?: string;
+      idpMetadata?: string;
+    }>("ssoConfig");
+    if (!ssoRaw?.domain) return;
+    const { EnterpriseSSOManager } = await import("@dantecode/core");
+    const ssoManager = new EnterpriseSSOManager({
+      provider: (ssoRaw.provider ?? "saml") as "saml" | "oidc",
+      entityId: ssoRaw.entityId ?? `dantecode:${ssoRaw.domain}`,
+      acsUrl: ssoRaw.acsUrl ?? `https://${ssoRaw.domain}/acs`,
+      idpMetadata: ssoRaw.idpMetadata ?? "",
+      allowedDomains: [ssoRaw.domain],
+    });
+    outputChannel.appendLine(`[Enterprise SSO: active — domain: ${ssoRaw.domain}]`);
+    const activeSessions = ssoManager.getActiveSessions();
+    const sessionStatus = activeSessions.length > 0 ? "session active" : "no active session";
+    outputChannel.appendLine(`[Enterprise SSO: ${sessionStatus}]`);
+    if (statusBarState?.item) {
+      statusBarState.item.tooltip = `DanteCode — SSO: ${ssoRaw.domain}`;
+    }
+  } catch {
+    // SSO config check is best-effort — never block activation
+  }
+}
+
+function activateInner(context: vscode.ExtensionContext): void {
+  const extensionUri = context.extensionUri;
+
+  setupReloadNotification(context);
+
+  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
+  setupRepoMapTree(context, projectRoot);
+
+  setupSidebarProviders(context, extensionUri);
+
+  setupCompletionInfra(context);
+
+  const contextRetriever = setupInlineCompletionStack(context);
+
+  setupRealtimeDiagnostics(context);
+
+  // Internal acceptance tracking command (fired by InlineCompletionItem.command)
+  context.subscriptions.push(
+    vscode.commands.registerCommand("dantecode._internalTrackAccept", (completionId: string) => {
+      completionAcceptanceTracker?.trackAccepted(completionId);
+    }),
+  );
+
+  // ── Status bar ──
+  statusBarState = createStatusBar(context);
+  updateStatusBar(statusBarState, DEFAULT_MODEL_ID, "none");
+
+  // ── Circuit breaker status bar indicator (dim 24) ──
+  createCircuitBreakerBar(context);
+
+  setupCodeIntelligenceProviders(context);
+
+  setupInlineEditProvider(context, projectRoot);
+
+  setupVSCodeContextProviders(context);
+  // Wire terminal manager into sidebar for test-failure auto-fix
+  chatSidebarProvider?.setTerminalOutputManager(terminalOutputManager);
+
+  setupCodebaseIndex(context, projectRoot, contextRetriever);
+
+  setupDebugAttach(context);
+  registerExtraContextProviders();
 
   // ── Streaming diff provider (SEARCH/REPLACE pre-apply preview) ──
   streamingDiffProvider = new StreamingDiffProvider(context);
@@ -648,70 +806,7 @@ function activateInner(context: vscode.ExtensionContext): void {
   // ── Commands ──
   registerCommands(context);
 
-  // ── Semantic go-to-definition (dim 4) ──
-  // Falls back from native LSP → embedding-based codebase search when LSP returns nothing.
-  context.subscriptions.push(
-    vscode.commands.registerCommand("dantecode.semanticGoToDefinition", async () => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) return;
-      const pos = editor.selection.active;
-      const wordRange = editor.document.getWordRangeAtPosition(pos);
-      const symbol = wordRange ? editor.document.getText(wordRange) : "";
-      if (!symbol) return;
-
-      // 1. Try native LSP definition provider first
-      try {
-        const lspResults = await vscode.commands.executeCommand<vscode.Location[]>(
-          "vscode.executeDefinitionProvider",
-          editor.document.uri,
-          pos,
-        );
-        if (lspResults && lspResults.length > 0) {
-          await vscode.commands.executeCommand("editor.action.revealDefinition");
-          return;
-        }
-      } catch {
-        /* LSP unavailable — fall through to semantic search */
-      }
-
-      // 2. Fallback: semantic search via codebase index (dim 4 gap-closer)
-      if (!codebaseIndexManager) {
-        void vscode.window.showInformationMessage(
-          "DanteCode: Codebase index not ready — try again in a moment",
-        );
-        return;
-      }
-      const rawHits = await codebaseIndexManager.search(symbol, 3);
-      const hits = rawHits as Array<{ filePath: string; startLine?: number; content: string }>;
-      if (hits.length === 0) {
-        void vscode.window.showInformationMessage(
-          `DanteCode: No semantic matches found for "${symbol}"`,
-        );
-        return;
-      }
-
-      const items = hits.map((h) => ({
-        label: path.basename(h.filePath),
-        description: `${h.filePath}:${h.startLine ?? 1}`,
-        detail: (h.content.split("\n")[0] ?? "").slice(0, 80),
-        filePath: h.filePath,
-        startLine: Math.max(0, (h.startLine ?? 1) - 1),
-      }));
-
-      const picked = await vscode.window.showQuickPick(items, {
-        title: `Semantic go-to-definition: ${symbol}`,
-        placeHolder: "Select result to navigate",
-        matchOnDescription: true,
-        matchOnDetail: true,
-      });
-      if (!picked) return;
-
-      const uri = vscode.Uri.file(picked.filePath);
-      await vscode.window.showTextDocument(uri, {
-        selection: new vscode.Range(picked.startLine, 0, picked.startLine, 0),
-      });
-    }),
-  );
+  registerSemanticGoToDefinition(context);
 
   // ── Output channel ──
   const outputChannel = vscode.window.createOutputChannel("DanteCode");
@@ -721,34 +816,7 @@ function activateInner(context: vscode.ExtensionContext): void {
   // Sprint AR (dim 6): wire edit quality hook → VSCode output channel
   setEditQualityOutputHook((line) => outputChannel.appendLine(line));
 
-  // ── Enterprise SSO gate (dim 28): check ssoConfig workspace setting on activation ──
-  // If ssoConfig is configured, surface domain in output channel and update status bar.
-  void (async () => {
-    try {
-      const ssoRaw = vscode.workspace.getConfiguration("dantecode").get<{ domain?: string; provider?: string; entityId?: string; acsUrl?: string; idpMetadata?: string }>("ssoConfig");
-      if (ssoRaw?.domain) {
-        const { EnterpriseSSOManager } = await import("@dantecode/core");
-        const ssoManager = new EnterpriseSSOManager({
-          provider: (ssoRaw.provider ?? "saml") as "saml" | "oidc",
-          entityId: ssoRaw.entityId ?? `dantecode:${ssoRaw.domain}`,
-          acsUrl: ssoRaw.acsUrl ?? `https://${ssoRaw.domain}/acs`,
-          idpMetadata: ssoRaw.idpMetadata ?? "",
-          allowedDomains: [ssoRaw.domain],
-        });
-        outputChannel.appendLine(`[Enterprise SSO: active — domain: ${ssoRaw.domain}]`);
-        // Check if any existing sessions are valid
-        const activeSessions = ssoManager.getActiveSessions();
-        const sessionStatus = activeSessions.length > 0 ? "session active" : "no active session";
-        outputChannel.appendLine(`[Enterprise SSO: ${sessionStatus}]`);
-        // Update status bar tooltip with SSO domain
-        if (statusBarState?.item) {
-          statusBarState.item.tooltip = `DanteCode — SSO: ${ssoRaw.domain}`;
-        }
-      }
-    } catch {
-      // SSO config check is best-effort — never block activation
-    }
-  })();
+  void runEnterpriseSSOCheck(outputChannel);
 
   // ── First-run onboarding ──
   if (!OnboardingProvider.hasOnboarded(context)) {
