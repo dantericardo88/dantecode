@@ -950,6 +950,138 @@ async function toolGitPush(
   }
 }
 
+/**
+ * Pre-flight safety gates for the vscode executeTool. Returns a blocking
+ * ToolResult or null. Mirrors the cli-side gates with vscode-specific
+ * differences (file-op set includes ReplaceInFile, self-mod has an
+ * interactive confirmation hook).
+ */
+async function checkVscodeExecutionGates(
+  name: string,
+  input: Record<string, unknown>,
+  projectRoot: string,
+  context: ToolExecutionContext | undefined,
+  filePath: string | undefined,
+  isFileOp: boolean,
+): Promise<ToolResult | null> {
+  if (context?.sandboxEnabled && isFileOp && filePath) {
+    const resolved = resolvePath(filePath, projectRoot);
+    if (!resolved.startsWith(projectRoot)) {
+      return { content: `Sandbox: write blocked — path escapes project root: ${resolved}`, isError: true };
+    }
+  }
+  if (context?.sandboxEnabled && name === "Bash") {
+    const command = input["command"] as string | undefined;
+    if (command && SANDBOX_BLOCKED_PATTERNS.some((p) => p.test(command))) {
+      return { content: `Sandbox: command blocked (matches restricted pattern)`, isError: true };
+    }
+  }
+  if (context?.sandboxEnabled && name === "GitPush") {
+    return {
+      content: "Sandbox: git push is blocked while sandbox mode is enabled. Disable sandbox to push to a remote.",
+      isError: true,
+    };
+  }
+  if (name === "Bash") {
+    const command = input["command"] as string | undefined;
+    if (command && isRepoInternalCdChain(command, projectRoot)) {
+      return {
+        content: "Error: Run this from the repository root instead of chaining `cd ... &&`. Re-issue the command from the root worktree so verification and audit paths stay consistent.",
+        isError: true,
+      };
+    }
+    if (context && command && isSelfModificationBashCommand(command)) {
+      return { content: "Self-modification blocked: bash command targets protected paths", isError: true };
+    }
+  }
+  if (context && isFileOp && filePath && isSelfModificationTarget(filePath, projectRoot)) {
+    const blocked = await checkVscodeSelfModGate(filePath, projectRoot, context);
+    if (blocked) return blocked;
+  }
+  return null;
+}
+
+/** Self-modification gate with optional interactive confirmation hook. */
+async function checkVscodeSelfModGate(
+  filePath: string,
+  projectRoot: string,
+  context: ToolExecutionContext,
+): Promise<ToolResult | null> {
+  await appendSelfModificationAudit(projectRoot, context, "self_modification_attempt", filePath);
+  const autoAllowed = isSelfImprovementWriteAllowed(filePath, projectRoot, context.selfImprovement);
+  if (autoAllowed) {
+    await appendSelfModificationAudit(projectRoot, context, "self_modification_allowed", filePath);
+    return null;
+  }
+  context.onSelfModificationAttempt?.(filePath);
+  if (context.awaitSelfModConfirmation) {
+    const confirmed = await context.awaitSelfModConfirmation();
+    if (confirmed) {
+      await appendSelfModificationAudit(projectRoot, context, "self_modification_allowed", filePath);
+      return null;
+    }
+  }
+  await appendSelfModificationAudit(projectRoot, context, "self_modification_denied", filePath);
+  return {
+    content: `Self-modification blocked (PERMANENT): ${filePath} — DanteCode protects its own source files. Do not retry this write.`,
+    isError: true,
+  };
+}
+
+/** Tool name → handler dispatch for the vscode side. */
+async function dispatchVscodeToolByName(
+  name: string,
+  input: Record<string, unknown>,
+  projectRoot: string,
+  context: ToolExecutionContext | undefined,
+): Promise<ToolResult> {
+  switch (name) {
+    case "Read":          return toolRead(input, projectRoot, context);
+    case "Write":         return toolWrite(input, projectRoot, context);
+    case "Edit":          return toolEdit(input, projectRoot, context);
+    case "ReplaceInFile": return toolReplaceInFile(input, projectRoot, context);
+    case "ListDir":       return toolListDir(input, projectRoot);
+    case "Bash":          return toolBash(input, projectRoot);
+    case "SubmitPatch":   return toolSubmitPatch(input, projectRoot);
+    case "Glob":          return toolGlob(input, projectRoot);
+    case "Grep":          return toolGrep(input, projectRoot);
+    case "SelfUpdate":    return toolSelfUpdate(input, projectRoot);
+    case "GitCommit":     return toolGitCommit(input, projectRoot);
+    case "GitPush":       return toolGitPush(input, projectRoot);
+    default:              return { content: `Unknown tool: ${name}`, isError: true };
+  }
+}
+
+/** Emit the colored diff hunk after a successful file operation. Truncates
+ * large diffs so the webview stays responsive. */
+async function emitDiffHunk(
+  filePath: string,
+  oldContent: string | null,
+  projectRoot: string,
+  context: ToolExecutionContext,
+): Promise<void> {
+  try {
+    const newContent = await readFile(resolvePath(filePath, projectRoot), "utf-8");
+    const hunk = generateColoredHunk(oldContent ?? "", newContent, filePath);
+    const MAX_HUNK_LINES = 80;
+    if (hunk.lines && hunk.lines.length > MAX_HUNK_LINES) {
+      const omitted = hunk.lines.length - MAX_HUNK_LINES;
+      hunk.fullLineCount = hunk.lines.length;
+      hunk.truncated = true;
+      hunk.lines = [
+        ...hunk.lines.slice(0, MAX_HUNK_LINES),
+        {
+          type: "context",
+          content: `... ${omitted} more lines omitted ...`,
+          oldLineNo: null,
+          newLineNo: null,
+        },
+      ];
+    }
+    context.onDiffHunk?.({ filePath, hunk, newContent, oldContent: oldContent ?? "" });
+  } catch { /* non-critical: diff generation */ }
+}
+
 export async function executeTool(
   name: string,
   input: Record<string, unknown>,
@@ -959,102 +1091,10 @@ export async function executeTool(
   const filePath = input["file_path"] as string | undefined;
   const isFileOp = name === "Write" || name === "Edit" || name === "ReplaceInFile";
 
-  // Sandbox guard: block out-of-root writes
-  if (context?.sandboxEnabled && isFileOp && filePath) {
-    const resolved = resolvePath(filePath, projectRoot);
-    if (!resolved.startsWith(projectRoot)) {
-      return {
-        content: `Sandbox: write blocked — path escapes project root: ${resolved}`,
-        isError: true,
-      };
-    }
-  }
+  const blocked = await checkVscodeExecutionGates(name, input, projectRoot, context, filePath, isFileOp);
+  if (blocked) return blocked;
 
-  // Sandbox guard: block dangerous bash commands
-  if (context?.sandboxEnabled && name === "Bash") {
-    const command = input["command"] as string | undefined;
-    if (command && SANDBOX_BLOCKED_PATTERNS.some((p) => p.test(command))) {
-      return {
-        content: `Sandbox: command blocked (matches restricted pattern)`,
-        isError: true,
-      };
-    }
-  }
-
-  if (context?.sandboxEnabled && name === "GitPush") {
-    return {
-      content:
-        "Sandbox: git push is blocked while sandbox mode is enabled. Disable sandbox to push to a remote.",
-      isError: true,
-    };
-  }
-
-  if (name === "Bash") {
-    const command = input["command"] as string | undefined;
-    if (command && isRepoInternalCdChain(command, projectRoot)) {
-      return {
-        content:
-          "Error: Run this from the repository root instead of chaining `cd ... &&`. Re-issue the command from the root worktree so verification and audit paths stay consistent.",
-        isError: true,
-      };
-    }
-  }
-
-  // D5: Self-modification guard for Write/Edit
-  if (context && isFileOp && filePath && isSelfModificationTarget(filePath, projectRoot)) {
-    await appendSelfModificationAudit(projectRoot, context, "self_modification_attempt", filePath);
-
-    const autoAllowed = isSelfImprovementWriteAllowed(
-      filePath,
-      projectRoot,
-      context.selfImprovement,
-    );
-
-    if (!autoAllowed) {
-      context.onSelfModificationAttempt?.(filePath);
-      if (context.awaitSelfModConfirmation) {
-        const confirmed = await context.awaitSelfModConfirmation();
-        if (!confirmed) {
-          await appendSelfModificationAudit(
-            projectRoot,
-            context,
-            "self_modification_denied",
-            filePath,
-          );
-          return {
-            content: `Self-modification blocked (PERMANENT): ${filePath} — DanteCode protects its own source files. Do not retry this write.`,
-            isError: true,
-          };
-        }
-      } else {
-        await appendSelfModificationAudit(
-          projectRoot,
-          context,
-          "self_modification_denied",
-          filePath,
-        );
-        return {
-          content: `Self-modification blocked (PERMANENT): ${filePath} — DanteCode protects its own source files. Do not retry this write.`,
-          isError: true,
-        };
-      }
-    }
-
-    await appendSelfModificationAudit(projectRoot, context, "self_modification_allowed", filePath);
-  }
-
-  // D5: Self-modification guard for Bash
-  if (context && name === "Bash") {
-    const command = input["command"] as string | undefined;
-    if (command && isSelfModificationBashCommand(command)) {
-      return {
-        content: "Self-modification blocked: bash command targets protected paths",
-        isError: true,
-      };
-    }
-  }
-
-  // D3: Capture old content for colored diff
+  // Capture old content for colored diff (D3)
   let oldContent: string | null = null;
   if (context?.onDiffHunk && isFileOp && filePath) {
     try {
@@ -1064,87 +1104,13 @@ export async function executeTool(
     }
   }
 
-  // Dispatch to tool implementation
-  let result: ToolResult;
-  switch (name) {
-    case "Read":
-      result = await toolRead(input, projectRoot, context);
-      break;
-    case "Write":
-      result = await toolWrite(input, projectRoot, context);
-      break;
-    case "Edit":
-      result = await toolEdit(input, projectRoot, context);
-      break;
-    case "ReplaceInFile":
-      result = await toolReplaceInFile(input, projectRoot, context);
-      break;
-    case "ListDir":
-      result = await toolListDir(input, projectRoot);
-      break;
-    case "Bash":
-      result = await toolBash(input, projectRoot);
-      break;
-    case "SubmitPatch":
-      result = await toolSubmitPatch(input, projectRoot);
-      break;
-    case "Glob":
-      result = await toolGlob(input, projectRoot);
-      break;
-    case "Grep":
-      result = await toolGrep(input, projectRoot);
-      break;
-    case "SelfUpdate":
-      result = await toolSelfUpdate(input, projectRoot);
-      break;
-    case "GitCommit":
-      result = await toolGitCommit(input, projectRoot);
-      break;
-    case "GitPush":
-      result = await toolGitPush(input, projectRoot);
-      break;
-    default:
-      result = { content: `Unknown tool: ${name}`, isError: true };
-  }
+  const result = await dispatchVscodeToolByName(name, input, projectRoot, context);
 
-  // D3: Emit colored diff hunk after successful file operations
   if (context?.onDiffHunk && isFileOp && filePath && !result.isError) {
-    try {
-      const newContent = await readFile(resolvePath(filePath, projectRoot), "utf-8");
-      const hunk = generateColoredHunk(oldContent ?? "", newContent, filePath);
-
-      // Truncate large diffs to keep the webview responsive
-      const MAX_HUNK_LINES = 80;
-      if (hunk.lines && hunk.lines.length > MAX_HUNK_LINES) {
-        const omitted = hunk.lines.length - MAX_HUNK_LINES;
-        hunk.fullLineCount = hunk.lines.length;
-        hunk.truncated = true;
-        hunk.lines = [
-          ...hunk.lines.slice(0, MAX_HUNK_LINES),
-          {
-            type: "context",
-            content: `... ${omitted} more lines omitted ...`,
-            oldLineNo: null,
-            newLineNo: null,
-          },
-        ];
-      }
-
-      context.onDiffHunk({
-        filePath,
-        hunk,
-        newContent,
-        oldContent: oldContent ?? "",
-      });
-    } catch {
-      /* non-critical: diff generation */
-    }
+    await emitDiffHunk(filePath, oldContent, projectRoot, context);
   }
 
-  return {
-    ...result,
-    content: truncateToolOutput(result.content),
-  };
+  return { ...result, content: truncateToolOutput(result.content) };
 }
 
 function buildReadTrackerKey(context: ToolExecutionContext, resolvedPath: string): string {
