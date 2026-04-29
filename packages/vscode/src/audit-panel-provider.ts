@@ -28,132 +28,88 @@ function escapeHtml(text: string): string {
 /**
  * Render proof-first payload HTML for V+E events (exported for testing).
  */
-export function renderProofPayloadForTesting(type: string, payload: any): string {
-  var html = '<div class="proof-content">';
+/** One labelled `<div class="proof-field">` row. Value is HTML-escaped. */
+function field(label: string, value: unknown): string {
+  return `<div class="proof-field"><strong>${label}:</strong> ${escapeHtml(String(value ?? "N/A"))}</div>`;
+}
 
-  // Add proof badge
-  if (type === "mutation_observed") {
-    html += '<div class="proof-badge mutation">MUTATION</div>';
-  } else if (type === "validation_observed") {
-    html += '<div class="proof-badge validation">VALIDATION</div>';
-  } else if (type === "completion_gate_passed") {
-    html += '<div class="proof-badge gate-passed">GATE PASSED</div>';
-  } else if (type === "completion_gate_failed") {
-    html += '<div class="proof-badge gate-failed">GATE FAILED</div>';
-  } else if (type.startsWith("tool_call_")) {
-    html +=
-      '<div class="proof-badge tool">' +
-      (type === "tool_call_succeeded"
-        ? "TOOL SUCCESS"
-        : type === "tool_call_failed"
-          ? "TOOL FAILED"
-          : "TOOL START") +
-      "</div>";
+function renderProofBadge(type: string): string {
+  if (type === "mutation_observed") return '<div class="proof-badge mutation">MUTATION</div>';
+  if (type === "validation_observed") return '<div class="proof-badge validation">VALIDATION</div>';
+  if (type === "completion_gate_passed") return '<div class="proof-badge gate-passed">GATE PASSED</div>';
+  if (type === "completion_gate_failed") return '<div class="proof-badge gate-failed">GATE FAILED</div>';
+  if (type.startsWith("tool_call_")) {
+    const label =
+      type === "tool_call_succeeded" ? "TOOL SUCCESS" :
+      type === "tool_call_failed" ? "TOOL FAILED" :
+      "TOOL START";
+    return `<div class="proof-badge tool">${label}</div>`;
   }
+  return "";
+}
 
-  // Structured fields
-  if (
-    type === "tool_call_started" ||
-    type === "tool_call_succeeded" ||
-    type === "tool_call_failed"
-  ) {
-    html +=
-      '<div class="proof-field"><strong>Tool:</strong> ' +
-      escapeHtml(payload.toolName || "Unknown") +
-      "</div>";
-    html +=
-      '<div class="proof-field"><strong>Tool Call ID:</strong> ' +
-      escapeHtml(payload.toolCallId || "N/A") +
-      "</div>";
-    html +=
-      '<div class="proof-field"><strong>Input:</strong> ' +
-      escapeHtml(JSON.stringify(payload.input, null, 2)) +
-      "</div>";
-    if (payload.result) {
-      html +=
-        '<div class="proof-field"><strong>Result:</strong> ' +
-        escapeHtml(payload.result.content || "N/A") +
-        "</div>";
-    }
-  } else if (type === "mutation_observed") {
-    html +=
-      '<div class="proof-field"><strong>Tool Call ID:</strong> ' +
-      escapeHtml(payload.toolCallId || "N/A") +
-      "</div>";
-    html +=
-      '<div class="proof-field"><strong>File:</strong> ' +
-      escapeHtml(payload.path || "N/A") +
-      "</div>";
-    html +=
-      '<div class="proof-field"><strong>Before Hash:</strong> ' +
-      escapeHtml(payload.beforeHash || "N/A") +
-      "</div>";
-    html +=
-      '<div class="proof-field"><strong>After Hash:</strong> ' +
-      escapeHtml(payload.afterHash || "N/A") +
-      "</div>";
-    html +=
-      '<div class="proof-field"><strong>Diff Summary:</strong> ' +
-      escapeHtml(payload.diffSummary || "N/A") +
-      "</div>";
-    html +=
-      '<div class="proof-field"><strong>Additions/Deletions:</strong> +' +
-      (payload.additions || 0) +
-      " -" +
-      (payload.deletions || 0) +
-      "</div>";
-    if (payload.readSnapshotId) {
-      html +=
-        '<div class="proof-field"><strong>Read Snapshot ID:</strong> ' +
-        escapeHtml(payload.readSnapshotId) +
-        "</div>";
-    }
-  } else if (type === "validation_observed") {
-    html +=
-      '<div class="proof-field"><strong>Tool Call ID:</strong> ' +
-      escapeHtml(payload.toolCallId || "N/A") +
-      "</div>";
-    html +=
-      '<div class="proof-field"><strong>Type:</strong> ' +
-      escapeHtml(payload.type || "N/A") +
-      "</div>";
-    html +=
-      '<div class="proof-field"><strong>Command:</strong> ' +
-      escapeHtml(payload.command || "N/A") +
-      "</div>";
-    html +=
-      '<div class="proof-field"><strong>Passed:</strong> ' +
-      (payload.passed ? "Yes" : "No") +
-      "</div>";
-    html +=
-      '<div class="proof-field"><strong>Output:</strong> ' +
-      escapeHtml(payload.output || "N/A") +
-      "</div>";
-  } else if (type === "completion_gate_failed" || type === "completion_gate_passed") {
-    html +=
-      '<div class="proof-field"><strong>Passed:</strong> ' + (payload.ok ? "Yes" : "No") + "</div>";
-    if (payload.reasonCode) {
-      html +=
-        '<div class="proof-field"><strong>Reason:</strong> ' +
-        escapeHtml(payload.reasonCode) +
-        "</div>";
-    }
-    if (payload.message) {
-      html +=
-        '<div class="proof-field"><strong>Message:</strong> ' +
-        escapeHtml(payload.message) +
-        "</div>";
-    }
+function renderToolCallFields(payload: Record<string, unknown>): string {
+  let html = "";
+  html += field("Tool", payload["toolName"] || "Unknown");
+  html += field("Tool Call ID", payload["toolCallId"]);
+  html += field("Input", JSON.stringify(payload["input"], null, 2));
+  if (payload["result"]) {
+    html += field("Result", (payload["result"] as { content?: unknown }).content);
   }
-
-  // Raw JSON as details
-  html +=
-    "<details><summary>Raw JSON</summary><pre>" +
-    escapeHtml(JSON.stringify(payload, null, 2)) +
-    "</pre></details>";
-
-  html += "</div>";
   return html;
+}
+
+function renderMutationFields(payload: Record<string, unknown>): string {
+  let html = "";
+  html += field("Tool Call ID", payload["toolCallId"]);
+  html += field("File", payload["path"]);
+  html += field("Before Hash", payload["beforeHash"]);
+  html += field("After Hash", payload["afterHash"]);
+  html += field("Diff Summary", payload["diffSummary"]);
+  html += `<div class="proof-field"><strong>Additions/Deletions:</strong> +${String(payload["additions"] || 0)} -${String(payload["deletions"] || 0)}</div>`;
+  if (payload["readSnapshotId"]) {
+    html += field("Read Snapshot ID", payload["readSnapshotId"]);
+  }
+  return html;
+}
+
+function renderValidationFields(payload: Record<string, unknown>): string {
+  let html = "";
+  html += field("Tool Call ID", payload["toolCallId"]);
+  html += field("Type", payload["type"]);
+  html += field("Command", payload["command"]);
+  html += `<div class="proof-field"><strong>Passed:</strong> ${payload["passed"] ? "Yes" : "No"}</div>`;
+  html += field("Output", payload["output"]);
+  return html;
+}
+
+function renderCompletionGateFields(payload: Record<string, unknown>): string {
+  let html = `<div class="proof-field"><strong>Passed:</strong> ${payload["ok"] ? "Yes" : "No"}</div>`;
+  if (payload["reasonCode"]) html += field("Reason", payload["reasonCode"]);
+  if (payload["message"]) html += field("Message", payload["message"]);
+  return html;
+}
+
+function renderProofFields(type: string, payload: Record<string, unknown>): string {
+  if (type === "tool_call_started" || type === "tool_call_succeeded" || type === "tool_call_failed") {
+    return renderToolCallFields(payload);
+  }
+  if (type === "mutation_observed") return renderMutationFields(payload);
+  if (type === "validation_observed") return renderValidationFields(payload);
+  if (type === "completion_gate_failed" || type === "completion_gate_passed") {
+    return renderCompletionGateFields(payload);
+  }
+  return "";
+}
+
+export function renderProofPayloadForTesting(type: string, payload: Record<string, unknown>): string {
+  return [
+    '<div class="proof-content">',
+    renderProofBadge(type),
+    renderProofFields(type, payload),
+    `<details><summary>Raw JSON</summary><pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre></details>`,
+    "</div>",
+  ].join("");
 }
 
 /**
@@ -439,7 +395,7 @@ export class AuditPanelProvider implements vscode.WebviewViewProvider {
   /**
    * Generates the full HTML for the audit panel webview.
    */
-  private getHtmlForWebview(_webview: vscode.Webview): string {
+  getHtmlForWebview(_webview: vscode.Webview): string {
     const nonce = getNonce();
 
     return `<!DOCTYPE html>
