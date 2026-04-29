@@ -55,7 +55,7 @@ class LRUCache<K, V> {
  * Flatten a Hover's contents into a plain text string.
  * Each `vscode.Hover` has `.contents: (string | vscode.MarkdownString)[]`.
  */
-function flattenHoverContents(hovers: vscode.Hover[]): string {
+export function flattenHoverContents(hovers: vscode.Hover[]): string {
   return hovers
     .flatMap((h) =>
       h.contents.map((c) => (typeof c === "string" ? c : c.value)),
@@ -86,7 +86,7 @@ function resolveLocationRange(
 /**
  * Extract ±contextLines lines around a given line number from a TextDocument.
  */
-function extractDocumentContext(
+export function extractDocumentContext(
   doc: vscode.TextDocument,
   line: number,
   contextLines = 20,

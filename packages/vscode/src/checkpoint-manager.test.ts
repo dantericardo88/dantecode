@@ -3,13 +3,20 @@ import { CheckpointManager, type CheckpointPersistenceFile } from "./checkpoint-
 
 describe("CheckpointManager", () => {
   const execCommand = vi.fn();
-  const writeFile = vi.fn().mockResolvedValue(undefined);
+  const writeFile = vi.fn();
   const readFile = vi.fn();
-  const mkdir = vi.fn().mockResolvedValue(undefined);
+  const mkdir = vi.fn();
   let manager: CheckpointManager;
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    // resetAllMocks (not clearAllMocks) clears the mockResolvedValueOnce
+    // queue. Tests like "rewinds snapshot checkpoints" set up an Once
+    // rejection but never consume it (the snapshot path short-circuits
+    // before reaching execCommand); without a queue reset, the leftover
+    // rejection trips the next git-stash test with a phantom failure.
+    vi.resetAllMocks();
+    writeFile.mockResolvedValue(undefined);
+    mkdir.mockResolvedValue(undefined);
     manager = new CheckpointManager("/workspace", {
       execCommand,
       writeFile,

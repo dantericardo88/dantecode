@@ -1,61 +1,91 @@
-import * as vscode from 'vscode';
-import * as assert from 'assert';
-import { isHighContrastTheme, onThemeAccessibilityChange, enhanceWebviewAccessibility, announceToScreenReader, getKeyboardNavScript, AccessibilityProvider } from './accessibility-provider.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock VSCode globals for headless testing
-let mockThemeKind = vscode.ColorThemeKind.Dark;
-vscode.window.activeColorTheme = { kind: mockThemeKind } as any;
+// Mock vscode peer dep with the surface accessibility-provider touches.
+let mockThemeKind = 2; // Dark = 2 in real vscode enum
+vi.mock('vscode', () => ({
+  ColorThemeKind: {
+    Light: 1,
+    Dark: 2,
+    HighContrast: 3,
+    HighContrastLight: 4,
+  },
+  StatusBarAlignment: { Left: 1, Right: 2 },
+  ThemeColor: vi.fn((id: string) => ({ id })),
+  window: {
+    get activeColorTheme() {
+      return { kind: mockThemeKind };
+    },
+    onDidChangeActiveColorTheme: vi.fn(() => ({ dispose: vi.fn() })),
+    createStatusBarItem: vi.fn(() => ({
+      text: '',
+      tooltip: '',
+      show: vi.fn(),
+      hide: vi.fn(),
+      dispose: vi.fn(),
+    })),
+  },
+}));
 
-vitest.describe('AccessibilityProvider', () => {
-  vitest.beforeEach(() => {
-    mockThemeKind = vscode.ColorThemeKind.Dark;
+import {
+  isHighContrastTheme,
+  enhanceWebviewAccessibility,
+  announceToScreenReader,
+  getKeyboardNavScript,
+  AccessibilityProvider,
+} from './accessibility-provider.js';
+
+describe('AccessibilityProvider', () => {
+  beforeEach(() => {
+    mockThemeKind = 2; // Dark
   });
 
-  vitest.it('detects high-contrast theme', () => {
-    mockThemeKind = vscode.ColorThemeKind.HighContrast;
-    assert.strictEqual(isHighContrastTheme(), true);
+  it('detects high-contrast theme', () => {
+    mockThemeKind = 3; // HighContrast
+    expect(isHighContrastTheme()).toBe(true);
 
-    mockThemeKind = vscode.ColorThemeKind.HighContrastLight;
-    assert.strictEqual(isHighContrastTheme(), true);
+    mockThemeKind = 4; // HighContrastLight
+    expect(isHighContrastTheme()).toBe(true);
 
-    mockThemeKind = vscode.ColorThemeKind.Dark;
-    assert.strictEqual(isHighContrastTheme(), false);
+    mockThemeKind = 2; // Dark
+    expect(isHighContrastTheme()).toBe(false);
   });
 
-  vitest.it('enhances webview HTML with accessibility attributes', () => {
-    const html = '<html><body><h1>Test</h1></body></html>';
+  it('enhances webview HTML with accessibility attributes', () => {
+    // High-contrast CSS is injected via `</head>` replacement, so the
+    // fixture HTML must include a head tag. Without it the regex no-ops.
+    const html = '<html><head></head><body><h1>Test</h1></body></html>';
     const enhanced = enhanceWebviewAccessibility(html, {
       panelLabel: 'DanteCode Panel',
       isHighContrast: true,
     });
 
-    assert.ok(enhanced.includes('lang="en"'));
-    assert.ok(enhanced.includes('aria-label="DanteCode Panel"'));
-    assert.ok(enhanced.includes('--dante-focus-ring'));
-    assert.ok(enhanced.includes('*:focus { outline: var(--dante-focus-ring)'));
+    expect(enhanced).toContain('lang="en"');
+    expect(enhanced).toContain('aria-label="DanteCode Panel"');
+    expect(enhanced).toContain('--dante-focus-ring');
+    expect(enhanced).toContain('*:focus { outline: var(--dante-focus-ring)');
   });
 
-  vitest.it('generates keyboard navigation script', () => {
+  it('generates keyboard navigation script', () => {
     const script = getKeyboardNavScript();
-    assert.ok(script.includes('document.addEventListener('));
-    assert.ok(script.includes('keydown'));
-    assert.ok(script.includes('Tab'));
-    assert.ok(script.includes('a[href],button'));
+    expect(script).toContain('document.addEventListener(');
+    expect(script).toContain('keydown');
+    expect(script).toContain('Tab');
+    expect(script).toContain('a[href],button');
   });
 
-  vitest.it('AccessibilityProvider initializes correctly', () => {
+  it('AccessibilityProvider initializes correctly', () => {
     const mockContext = { subscriptions: [] } as any;
     const provider = AccessibilityProvider.register(mockContext);
-    assert.ok(provider);
-    assert.strictEqual(AccessibilityProvider.highContrast, false);
+    expect(provider).toBeTruthy();
+    expect(AccessibilityProvider.highContrast).toBe(false);
   });
 });
 
-vitest.describe('ARIA announcements', () => {
-  vitest.it('formats screen reader announcement postMessage', () => {
-    const mockWebview = { postMessage: vitest.fn() } as any;
+describe('ARIA announcements', () => {
+  it('formats screen reader announcement postMessage', () => {
+    const mockWebview = { postMessage: vi.fn() } as any;
     announceToScreenReader(mockWebview, 'Test announcement');
-    assert.strictEqual(mockWebview.postMessage.mock.calls[0][0].type, 'a11y-announce');
-    assert.strictEqual(mockWebview.postMessage.mock.calls[0][0].message, 'Test announcement');
+    expect(mockWebview.postMessage.mock.calls[0][0].type).toBe('a11y-announce');
+    expect(mockWebview.postMessage.mock.calls[0][0].message).toBe('Test announcement');
   });
 });

@@ -65,10 +65,15 @@ import { InlineEditProvider } from "../inline-edit-provider.js";
 
 // ── Source file helpers ───────────────────────────────────────────────────────
 
-const SIDEBAR_SRC = readFileSync(
-  resolve(__dirname, "../sidebar-provider.ts"),
-  "utf8",
-);
+// 2026-04-28 refactor: webview HTML/CSS/JS lives in webview-html.ts now.
+// These ui-polish assertions all target webview content, so concatenate both
+// files — sidebar-provider still owns chat orchestration logic that some
+// tests inspect.
+const SIDEBAR_SRC = (() => {
+  const sidebar = readFileSync(resolve(__dirname, "../sidebar-provider.ts"), "utf8");
+  const webview = readFileSync(resolve(__dirname, "../webview-html.ts"), "utf8");
+  return sidebar + "\n" + webview;
+})();
 
 // ── Minimal renderMarkdown replica (extracted from sidebar-provider template) ──
 

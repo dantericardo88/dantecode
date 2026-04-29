@@ -1,18 +1,35 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as vscode from 'vscode';
-import { HOVER_PROVIDER, DEFINITION_PROVIDER, REFERENCES_PROVIDER, SYMBOL_PROVIDER, TYPES_PROVIDER } from './lsp-context-provider.js';
+import {
+  HOVER_PROVIDER,
+  DEFINITION_PROVIDER,
+  REFERENCES_PROVIDER,
+  SYMBOL_PROVIDER,
+  TYPES_PROVIDER,
+  flattenHoverContents,
+  extractDocumentContext,
+} from './lsp-context-provider.js';
 
 // Mock vscode
-vi.mock('vscode', () => ({
-  window: { activeTextEditor: null },
-  workspace: {
-    openTextDocument: vi.fn(),
-    asRelativePath: vi.fn(),
-  },
-  commands: {
-    executeCommand: vi.fn(),
-  },
-}));
+vi.mock('vscode', () => {
+  class Position {
+    constructor(public readonly line: number, public readonly character: number) {}
+  }
+  return {
+    Position,
+    Uri: {
+      file: (p: string) => ({ fsPath: p, path: p, scheme: 'file', toString: () => p }),
+    },
+    window: { activeTextEditor: undefined as unknown },
+    workspace: {
+      openTextDocument: vi.fn(),
+      asRelativePath: vi.fn(),
+    },
+    commands: {
+      executeCommand: vi.fn(),
+    },
+  };
+});
 
 const mockEditor = {
   document: { uri: vscode.Uri.file('/test.ts'), lineCount: 100 },
@@ -69,7 +86,6 @@ describe('lsp-context-provider', () => {
   });
 
   describe('flattenHoverContents', () => {
-    const { flattenHoverContents } = await import('./lsp-context-provider.js');
     it('flattens mixed hover contents', () => {
       const hovers = [{
         contents: ['plain', { value: '**bold**' }, ''],
@@ -84,7 +100,6 @@ describe('lsp-context-provider', () => {
   });
 
   describe('extractDocumentContext', () => {
-    const { extractDocumentContext } = await import('./lsp-context-provider.js');
     it('extracts context around line', () => {
       const mockDoc = {
         lineCount: 100,
@@ -95,10 +110,15 @@ describe('lsp-context-provider', () => {
     });
 
     it('handles edge cases', () => {
-      const mockDoc = { lineCount: 5, lineAt: vi.fn() } as any;
+      // lineCount=5, line=0, contextLines=10 → loop runs i=0..4 (5 calls).
+      // Verify both endpoints: 1st call is lineAt(0), 5th call is lineAt(4).
+      const mockDoc = {
+        lineCount: 5,
+        lineAt: vi.fn((i: number) => ({ text: `line ${i}` })),
+      } as any;
       extractDocumentContext(mockDoc, 0, 10);
-      expect(mockDoc.lineAt).toHaveBeenCalledWith(0);
-      expect(mockDoc.lineAt).toHaveBeenNthCalledWith(4, 4);
+      expect(mockDoc.lineAt).toHaveBeenNthCalledWith(1, 0);
+      expect(mockDoc.lineAt).toHaveBeenNthCalledWith(5, 4);
     });
   });
 

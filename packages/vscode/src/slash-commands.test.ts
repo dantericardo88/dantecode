@@ -9,9 +9,12 @@ describe('slash-commands', () => {
 
   describe('parseSlashCommand', () => {
     it('returns null for non-slash input', () => {
+      // parser does input.trim() before the leading-slash check, so a
+      // string with no slash at all is the only true non-match. Leading
+      // whitespace is tolerated by design (better paste-from-chat UX).
       expect(parseSlashCommand('hello')).toBeNull();
-      expect(parseSlashCommand(' /fix')).toBeNull();
       expect(parseSlashCommand('')).toBeNull();
+      expect(parseSlashCommand('   ')).toBeNull();
     });
 
     it('parses simple commands without args', () => {
