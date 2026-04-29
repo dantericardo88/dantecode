@@ -169,6 +169,53 @@ export function parseRetryAfterMs(
   return Math.max(0, retryAtMs - nowMs);
 }
 
+interface ClassificationRule {
+  category: ParsedApiErrorCategory;
+  isRetryable: boolean;
+  /** When true, retryAfterMs is propagated onto the ParsedApiError. */
+  surfaceRetryAfter?: boolean;
+  matches: (statusCode: number | undefined, message: string) => boolean;
+}
+
+const CLASSIFICATION_RULES: ClassificationRule[] = [
+  {
+    category: "rate_limit", isRetryable: true, surfaceRetryAfter: true,
+    matches: (s, m) => s === 429 || matchesAny(RATE_LIMIT_PATTERNS, m),
+  },
+  {
+    category: "context_overflow", isRetryable: false,
+    matches: (_s, m) => matchesAny(CONTEXT_OVERFLOW_PATTERNS, m),
+  },
+  {
+    category: "auth", isRetryable: false,
+    matches: (s, m) => s === 401 || s === 403 || matchesAny(AUTH_PATTERNS, m),
+  },
+  {
+    category: "quota", isRetryable: false,
+    matches: (_s, m) => matchesAny(QUOTA_PATTERNS, m),
+  },
+  {
+    category: "tool_schema", isRetryable: false,
+    matches: (_s, m) => matchesAny(TOOL_SCHEMA_PATTERNS, m),
+  },
+  {
+    category: "invalid_request", isRetryable: false,
+    matches: (s, m) => s === 400 || s === 422 || matchesAny(INVALID_REQUEST_PATTERNS, m),
+  },
+  {
+    category: "timeout", isRetryable: true,
+    matches: (s, m) => s === 408 || s === 504 || matchesAny(TIMEOUT_PATTERNS, m),
+  },
+  {
+    category: "network", isRetryable: true,
+    matches: (_s, m) => matchesAny(NETWORK_PATTERNS, m),
+  },
+  {
+    category: "server", isRetryable: true, surfaceRetryAfter: true,
+    matches: (s, m) => (s !== undefined && s >= 500) || matchesAny(SERVER_PATTERNS, m),
+  },
+];
+
 export function classifyApiError(
   error: unknown,
   provider?: ModelProvider | string,
@@ -183,105 +230,18 @@ export function classifyApiError(
     (retryAfterMsHeader ? Number.parseInt(retryAfterMsHeader, 10) : undefined) ??
     parseRetryAfterMs(retryAfterHeader, nowMs);
 
-  if (statusCode === 429 || matchesAny(RATE_LIMIT_PATTERNS, message)) {
-    return {
-      category: "rate_limit",
-      message,
-      provider,
-      statusCode,
-      isRetryable: true,
-      retryAfterMs,
-      raw: error,
-    };
-  }
-
-  if (matchesAny(CONTEXT_OVERFLOW_PATTERNS, message)) {
-    return {
-      category: "context_overflow",
-      message,
-      provider,
-      statusCode,
-      isRetryable: false,
-      raw: error,
-    };
-  }
-
-  if (statusCode === 401 || statusCode === 403 || matchesAny(AUTH_PATTERNS, message)) {
-    return {
-      category: "auth",
-      message,
-      provider,
-      statusCode,
-      isRetryable: false,
-      raw: error,
-    };
-  }
-
-  if (matchesAny(QUOTA_PATTERNS, message)) {
-    return {
-      category: "quota",
-      message,
-      provider,
-      statusCode,
-      isRetryable: false,
-      raw: error,
-    };
-  }
-
-  if (matchesAny(TOOL_SCHEMA_PATTERNS, message)) {
-    return {
-      category: "tool_schema",
-      message,
-      provider,
-      statusCode,
-      isRetryable: false,
-      raw: error,
-    };
-  }
-
-  if (statusCode === 400 || statusCode === 422 || matchesAny(INVALID_REQUEST_PATTERNS, message)) {
-    return {
-      category: "invalid_request",
-      message,
-      provider,
-      statusCode,
-      isRetryable: false,
-      raw: error,
-    };
-  }
-
-  if (statusCode === 408 || statusCode === 504 || matchesAny(TIMEOUT_PATTERNS, message)) {
-    return {
-      category: "timeout",
-      message,
-      provider,
-      statusCode,
-      isRetryable: true,
-      raw: error,
-    };
-  }
-
-  if (matchesAny(NETWORK_PATTERNS, message)) {
-    return {
-      category: "network",
-      message,
-      provider,
-      statusCode,
-      isRetryable: true,
-      raw: error,
-    };
-  }
-
-  if ((statusCode !== undefined && statusCode >= 500) || matchesAny(SERVER_PATTERNS, message)) {
-    return {
-      category: "server",
-      message,
-      provider,
-      statusCode,
-      isRetryable: true,
-      retryAfterMs,
-      raw: error,
-    };
+  for (const rule of CLASSIFICATION_RULES) {
+    if (rule.matches(statusCode, message)) {
+      return {
+        category: rule.category,
+        message,
+        provider,
+        statusCode,
+        isRetryable: rule.isRetryable,
+        ...(rule.surfaceRetryAfter ? { retryAfterMs } : {}),
+        raw: error,
+      };
+    }
   }
 
   return {
