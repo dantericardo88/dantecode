@@ -309,6 +309,24 @@ describe("regression guard — ascend orchestrator wiring", () => {
     }
   });
 
+  it("SWE-bench runner has per-repo timeout tiers (Pattern D mitigation)", () => {
+    // 10 instances of timeout failure in the failure-mode trend. A single
+    // 600s default wastes budget on small repos and starves large ones —
+    // astropy/matplotlib eat 60-120s rebuilding C extensions before the
+    // agent runs. selectInstanceTimeout puts each instance in the right
+    // tier. If this regresses, the timeout bucket creeps back up.
+    const runner = readFileSync(
+      join(REPO_ROOT, "packages", "cli", "src", "swe-bench-runner.ts"),
+      "utf-8",
+    );
+    expect(runner).toMatch(/export function selectInstanceTimeout/);
+    expect(runner).toMatch(/SMALL_REPOS\b/);
+    expect(runner).toMatch(/LARGE_REPOS\b/);
+    expect(runner).toMatch(/astropy\/astropy/);
+    expect(runner).toMatch(/psf\/requests/);
+    expect(runner).toMatch(/selectInstanceTimeout\(instance\.repo/);
+  });
+
   it("SWE-bench harness pre-executes failing tests to prime the agent (OpenHands CodeAct)", () => {
     // OpenHands CodeAct pattern — running the FAIL_TO_PASS tests once
     // before the agent edits. The stack trace becomes priming context so

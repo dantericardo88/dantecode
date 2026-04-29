@@ -107,6 +107,47 @@ const PYTEST_FLAGS = [
   "-p", "no:astropy",
 ];
 
+/**
+ * Per-repo agent timeout tiers. The single 600s default wastes budget on
+ * small repos and starves large ones — astropy/matplotlib eat 60-120s
+ * just rebuilding C extensions before the agent does anything. Allocate
+ * by repo class so total wall-clock is comparable but each instance gets
+ * the budget it actually needs.
+ *
+ * Tier rules:
+ *   - small  (240s): test runners that cold-start fast and have small
+ *     codebases. The agent has plenty of budget to think + edit.
+ *   - medium (600s): default. Most repos sit here.
+ *   - large  (1200s): repos with C/Cython extensions where setup
+ *     consumes a significant chunk of the budget before the agent runs.
+ */
+const TIMEOUT_TIER_SMALL = 240_000;
+const TIMEOUT_TIER_LARGE = 1_200_000;
+const SMALL_REPOS = new Set([
+  "psf/requests",
+  "pallets/flask",
+  "pallets/click",
+  "pallets/jinja",
+]);
+const LARGE_REPOS = new Set([
+  "astropy/astropy",
+  "matplotlib/matplotlib",
+  "scipy/scipy",
+  "scikit-learn/scikit-learn",
+  "pydata/xarray",
+]);
+
+/**
+ * Pick the per-instance timeout. Caller-supplied options.timeout always
+ * wins (lets tests + harness overrides bypass the tier table).
+ */
+export function selectInstanceTimeout(repo: string, override?: number): number {
+  if (typeof override === "number" && override > 0) return override;
+  if (LARGE_REPOS.has(repo)) return TIMEOUT_TIER_LARGE;
+  if (SMALL_REPOS.has(repo)) return TIMEOUT_TIER_SMALL;
+  return DEFAULT_TIMEOUT_MS;
+}
+
 // ----------------------------------------------------------------------------
 // Subprocess helpers
 // ----------------------------------------------------------------------------
@@ -332,7 +373,7 @@ export async function runSWEBenchInstance(
   options: { model?: string; timeout?: number; useCachedClone?: boolean } = {},
 ): Promise<SWERunResult> {
   const model = options.model ?? process.env["DANTECODE_MODEL"] ?? DEFAULT_MODEL;
-  const timeoutMs = options.timeout ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = selectInstanceTimeout(instance.repo, options.timeout);
   const startTime = Date.now();
 
   // Use a temp workspace to avoid polluting the project
