@@ -10052,3 +10052,1003 @@ Auto-maintained by DanteForge wiki engine.
     - constitutionAlignment: 3
     - integrationFitness: 10
     - freshness: 10
+## CONSTITUTION | 2026-04-29T16:45:40.158Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T16:45:40.159Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T16:45:40.160Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T16:45:40.160Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T16:45:40.161Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T16:45:46.504Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T16:45:46.504Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T16:45:46.505Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T16:45:46.505Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T16:45:46.506Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T16:45:59.938Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T16:45:59.940Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T16:45:59.941Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T16:45:59.941Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T16:45:59.942Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T16:56:04.386Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T16:56:04.388Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T16:56:04.389Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T16:56:04.389Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T16:56:04.390Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T16:56:09.420Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T16:56:09.421Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T16:56:09.421Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T16:56:09.422Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T16:56:09.422Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T16:59:07.321Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T16:59:07.323Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T16:59:07.324Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T16:59:07.325Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T16:59:07.326Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T16:59:13.812Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T16:59:13.813Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T16:59:13.813Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T16:59:13.814Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T16:59:13.814Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T17:23:07.555Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T17:23:07.558Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T17:23:07.560Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T17:23:07.560Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T17:23:07.562Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T17:23:18.057Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T17:23:18.058Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T17:23:18.060Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T17:23:18.061Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T17:23:18.062Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T17:31:55.424Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T17:31:55.429Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T17:31:55.431Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T17:31:55.432Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T17:31:55.435Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T17:32:02.690Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T17:32:02.691Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T17:32:02.692Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T17:32:02.692Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T17:32:02.693Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T18:41:12.321Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T18:41:12.326Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T18:41:12.330Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T18:41:12.331Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T18:41:12.334Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T18:41:24.920Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T18:41:24.921Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T18:41:24.927Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T18:41:24.928Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T18:41:24.930Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T19:20:16.909Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T19:20:16.914Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T19:20:16.917Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T19:20:16.919Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T19:20:16.922Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T19:20:25.144Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T19:20:25.145Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T19:20:25.147Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T19:20:25.148Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T19:20:25.150Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T19:26:00.651Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T19:26:00.656Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T19:26:00.659Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T19:26:00.660Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T19:26:00.662Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T19:26:08.830Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T19:26:08.830Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T19:26:08.832Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T19:26:08.832Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T19:26:08.833Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T19:43:31.539Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T19:43:31.541Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T19:43:31.542Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T19:43:31.543Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T19:43:31.544Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T19:47:48.189Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T19:47:48.192Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T19:47:48.195Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T19:47:48.196Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T19:47:48.199Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CONSTITUTION | 2026-04-29T19:47:57.116Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 20
+    - testability: 20
+    - constitutionAlignment: 18
+    - integrationFitness: 10
+    - freshness: 10
+## SPEC | 2026-04-29T19:47:57.117Z
+- **Score**: 74
+- **Decision**: warn
+- **Dimensions**:
+    - completeness: 12
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## CLARIFY | 2026-04-29T19:47:57.118Z
+- **Score**: 98
+- **Decision**: advance
+- **Dimensions**:
+    - completeness: 20
+    - clarity: 19
+    - testability: 20
+    - constitutionAlignment: 19
+    - integrationFitness: 10
+    - freshness: 10
+## PLAN | 2026-04-29T19:47:57.118Z
+- **Score**: 47
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 4
+    - clarity: 0
+    - testability: 20
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10
+## TASKS | 2026-04-29T19:47:57.119Z
+- **Score**: 38
+- **Decision**: blocked
+- **Dimensions**:
+    - completeness: 10
+    - clarity: 0
+    - testability: 5
+    - constitutionAlignment: 3
+    - integrationFitness: 10
+    - freshness: 10

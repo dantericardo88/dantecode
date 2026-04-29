@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 // vi.hoisted ensures these are available when vi.mock factory runs (hoisted before module init)
-const { mockVscode, mockWorkspace, mockWindow, mockUri } = vi.hoisted(() => {
+const { mockVscode, mockUri } = vi.hoisted(() => {
   const mockUri = { fsPath: "/test" };
   const mockWorkspace = {
     workspaceFolders: [{ uri: mockUri }],
@@ -29,6 +29,21 @@ vi.mock("vscode", () => mockVscode);
 
 // Import after mocking
 import { AuditPanelProvider, renderProofPayloadForTesting } from "./audit-panel-provider.js";
+import type { Uri } from "vscode";
+
+type TestProofPayload = Record<string, unknown> & {
+  ok?: boolean;
+  reasonCode?: string;
+  toolName?: string;
+  toolCallId?: string;
+  input?: unknown;
+};
+
+const proofGlobal = globalThis as typeof globalThis & {
+  renderProofPayload: (type: string, payload: TestProofPayload) => string;
+};
+
+const extensionUri = mockUri as unknown as Uri;
 
 describe("AuditPanelProvider", () => {
   describe("Proof-first rendering with concrete V+E event payloads", () => {
@@ -113,7 +128,7 @@ describe("AuditPanelProvider", () => {
     });
 
     it("raw JSON appears only as secondary expandable details", () => {
-      const provider = new AuditPanelProvider(mockUri);
+      const provider = new AuditPanelProvider(extensionUri);
       const html = provider.getHtmlForWebview({} as any);
 
       // The script routes proof events through renderProofPayload and the rest through JSON.stringify
@@ -123,7 +138,7 @@ describe("AuditPanelProvider", () => {
     });
 
     it("non-proof events still render with generic JSON fallback", () => {
-      const provider = new AuditPanelProvider(mockUri);
+      const provider = new AuditPanelProvider(extensionUri);
       const html = provider.getHtmlForWebview({} as any);
 
       // Non-proof events should use JSON.stringify directly
@@ -131,8 +146,8 @@ describe("AuditPanelProvider", () => {
     });
 
     it("renders completion_gate_failed with concrete reasonCode", () => {
-      global.renderProofPayload = (type, payload) => {
-        var html = '<div class="proof-content">';
+      proofGlobal.renderProofPayload = (_type, payload) => {
+        let html = '<div class="proof-content">';
         html += '<div class="proof-badge gate-failed">GATE FAILED</div>';
         html += '<div class="proof-field"><strong>Passed:</strong> ' + (payload.ok ? 'Yes' : 'No') + '</div>';
         if (payload.reasonCode) {
@@ -150,7 +165,7 @@ describe("AuditPanelProvider", () => {
         timestamp: "2024-01-01T00:00:00.000Z"
       };
 
-      const rendered = global.renderProofPayload('completion_gate_failed', payload);
+      const rendered = proofGlobal.renderProofPayload('completion_gate_failed', payload);
 
       expect(rendered).toContain('GATE FAILED');
       expect(rendered).toContain('No');
@@ -159,8 +174,8 @@ describe("AuditPanelProvider", () => {
     });
 
     it("renders tool_call_succeeded with concrete tool metadata", () => {
-      global.renderProofPayload = (type, payload) => {
-        var html = '<div class="proof-content">';
+      proofGlobal.renderProofPayload = (_type, payload) => {
+        let html = '<div class="proof-content">';
         html += '<div class="proof-badge tool">TOOL SUCCESS</div>';
         html += '<div class="proof-field"><strong>Tool:</strong> ' + (payload.toolName || 'Unknown') + '</div>';
         html += '<div class="proof-field"><strong>Tool Call ID:</strong> ' + (payload.toolCallId || 'N/A') + '</div>';
@@ -177,7 +192,7 @@ describe("AuditPanelProvider", () => {
         timestamp: "2024-01-01T00:00:00.000Z"
       };
 
-      const rendered = global.renderProofPayload('tool_call_succeeded', payload);
+      const rendered = proofGlobal.renderProofPayload('tool_call_succeeded', payload);
 
       expect(rendered).toContain('TOOL SUCCESS');
       expect(rendered).toContain('Write');
@@ -186,7 +201,7 @@ describe("AuditPanelProvider", () => {
     });
 
     it("raw JSON appears only as secondary expandable details", () => {
-      const provider = new AuditPanelProvider(mockUri);
+      const provider = new AuditPanelProvider(extensionUri);
       const html = provider.getHtmlForWebview({} as any);
 
       // The script routes proof events through renderProofPayload and the rest through JSON.stringify
@@ -196,7 +211,7 @@ describe("AuditPanelProvider", () => {
     });
 
     it("non-proof events still render with generic JSON fallback", () => {
-      const provider = new AuditPanelProvider(mockUri);
+      const provider = new AuditPanelProvider(extensionUri);
       const html = provider.getHtmlForWebview({} as any);
 
       // Non-proof events should use JSON.stringify directly
@@ -205,7 +220,7 @@ describe("AuditPanelProvider", () => {
   });
 
   it("renders completion_gate_failed with reasonCode clearly", () => {
-    const provider = new AuditPanelProvider(mockUri);
+    const provider = new AuditPanelProvider(extensionUri);
     const html = provider.getHtmlForWebview({} as any);
 
     // completion_gate_failed is in the proofTypes list, so it routes through renderProofPayload
@@ -214,7 +229,7 @@ describe("AuditPanelProvider", () => {
   });
 
   it("renders tool_call_succeeded with tool name distinctly", () => {
-    const provider = new AuditPanelProvider(mockUri);
+    const provider = new AuditPanelProvider(extensionUri);
     const html = provider.getHtmlForWebview({} as any);
 
     // tool_call_succeeded is in the proofTypes list, so it routes through renderProofPayload
@@ -223,7 +238,7 @@ describe("AuditPanelProvider", () => {
   });
 
   it("raw JSON remains available as secondary details", () => {
-    const provider = new AuditPanelProvider(mockUri);
+    const provider = new AuditPanelProvider(extensionUri);
     const html = provider.getHtmlForWebview({} as any);
 
     // proofTypes routes events to renderProofPayload; renderProofPayload includes Raw JSON <details>

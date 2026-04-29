@@ -243,8 +243,8 @@ export class CompletionContextRetriever {
       };
       const embeddingProvider = await detectBestEmbeddingProvider();
       if (chunks.length > 0) {
-        const { HybridSearchEngine } = await import("@dantecode/core") as {
-          HybridSearchEngine: new () => { setEmbeddingProvider(p: unknown): void; indexAll(): Promise<void>; addDocument(id: string, text: string): void };
+        const { HybridSearchEngine } = await import("@dantecode/core") as unknown as {
+          HybridSearchEngine: new () => { setEmbeddingProvider(p: unknown): void; indexAll(...args: never[]): Promise<void>; addDocument(id: string, text: string): void };
         };
         const engine = new HybridSearchEngine();
         engine.setEmbeddingProvider(embeddingProvider);

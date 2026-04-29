@@ -1,0 +1,28 @@
+{
+  "pass": true,
+  "score": 100,
+  "threshold": 90,
+  "blockers": [],
+  "coverage": {
+    "keyboard": true,
+    "screenReader": true,
+    "contrast": true,
+    "highContrast": true,
+    "reducedMotion": true,
+    "focusOrder": true,
+    "liveRegions": true
+  },
+  "proof": [
+    "Keyboard reachability: yes",
+    "Screen reader semantics: yes",
+    "Contrast tokens: yes",
+    "High contrast readiness: yes",
+    "Reduced motion support: yes",
+    "Logical focus order: yes",
+    "Live region announcements: yes"
+  ],
+  "violations": [],
+  "source": "stdin",
+  "surface": "stdin",
+  "auditedAt": "2026-04-29T14:28:54.896Z"
+}

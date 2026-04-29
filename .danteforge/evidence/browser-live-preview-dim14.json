@@ -1,0 +1,80 @@
+{
+  "pass": false,
+  "score": 64,
+  "threshold": 90,
+  "maxEligibleScore": 7,
+  "previewUrl": "http://localhost:51145",
+  "blockers": [
+    "browser screenshot proof is required",
+    "accessibility tree capture is required",
+    "mobile and desktop viewport screenshots are required",
+    "keyboard traversal proof is required"
+  ],
+  "warnings": [
+    "trace artifact is absent; 9.5+ requires repeatable trace publication"
+  ],
+  "coverage": {
+    "managedPreview": true,
+    "devServerCommand": true,
+    "browserScreenshot": false,
+    "domInspection": true,
+    "accessibilityTree": false,
+    "cleanRuntime": true,
+    "responsiveViewports": false,
+    "hotReload": true,
+    "keyboardTraversal": false,
+    "repairLoop": true,
+    "artifacts": true
+  },
+  "proof": {
+    "dimensionId": "browser_live_preview",
+    "generatedAt": "2026-04-29T19:51:18.040Z",
+    "preview": {
+      "url": "http://localhost:51145",
+      "command": "node:http static canary",
+      "port": 51145,
+      "managed": true,
+      "startupMs": 52,
+      "framework": "static"
+    },
+    "captures": {
+      "domTextChars": 69,
+      "accessibilityTreeCaptured": false,
+      "consoleErrorCount": 0,
+      "networkFailureCount": 0,
+      "blockingErrorCount": 0,
+      "viewports": [
+        {
+          "width": 390,
+          "height": 844
+        },
+        {
+          "width": 1440,
+          "height": 900
+        }
+      ]
+    },
+    "hotReload": {
+      "pass": true,
+      "changedFile": "C:\\Projects\\DanteCode\\.danteforge\\preview-canary\\index.html",
+      "beforeHash": "82f52eaeb5b2924300f1b8517141d0e12137b32ca1b0bb9422b6f6bc991f244d",
+      "afterHash": "6c832a6967fee20903eabbdff649b8ce27710c542b1a51827a885b76e7bc1360",
+      "observedMs": 1
+    },
+    "keyboard": {
+      "pass": false,
+      "reachableControls": 0,
+      "totalControls": 1,
+      "focusOrder": []
+    },
+    "repair": {
+      "failureOverlayAvailable": true,
+      "repairPromptAvailable": true
+    },
+    "artifacts": {
+      "manifestPath": ".danteforge/evidence/browser-live-preview-dim14.json",
+      "reportPath": ".danteforge/evidence/browser-live-preview-dim14.md"
+    }
+  },
+  "generatedAt": "2026-04-29T19:51:18.043Z"
+}

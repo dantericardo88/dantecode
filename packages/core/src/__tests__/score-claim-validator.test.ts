@@ -49,6 +49,12 @@ describe("detectUnverifiedScoreClaims", () => {
         threshold: 90,
         profile: "score_claim",
       },
+      {
+        pass: true,
+        score: 100,
+        threshold: 90,
+        dimensionId: "benchmark_transparency",
+      },
     );
     expect(result).toBeNull();
   });
@@ -82,6 +88,48 @@ describe("detectUnverifiedScoreClaims", () => {
 
     expect(result).not.toBeNull();
     expect(result).toContain("failing regression gate");
+  });
+
+  it("returns warning when verified score output exists but benchmark transparency proof is absent", () => {
+    const result = detectUnverifiedScoreClaims(
+      "Dimension 45 benchmark transparency is now 9.0/10.",
+      SOME_OUTPUT,
+      true,
+      "Dimension 45 benchmark transparency is now 9.0/10.",
+      {
+        pass: true,
+        score: 100,
+        threshold: 90,
+        profile: "score_claim",
+      },
+      null,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result).toContain("benchmark transparency");
+  });
+
+  it("allows verified score output with passing regression and benchmark transparency proof", () => {
+    const result = detectUnverifiedScoreClaims(
+      "Dimension 45 benchmark transparency is now 9.0/10.",
+      SOME_OUTPUT,
+      true,
+      "Dimension 45 benchmark transparency is now 9.0/10.",
+      {
+        pass: true,
+        score: 100,
+        threshold: 90,
+        profile: "score_claim",
+      },
+      {
+        pass: true,
+        score: 95,
+        threshold: 90,
+        dimensionId: "benchmark_transparency",
+      },
+    );
+
+    expect(result).toBeNull();
   });
 
   it("detects 7.5/10 pattern", () => {

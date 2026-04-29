@@ -18,7 +18,7 @@ import {
   type ReviewOutcomeEntry,
 } from "@dantecode/core";
 import { resolve, join } from "node:path";
-import { appendFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 export interface ReviewCommandOptions {
   prNumber: number;
@@ -143,7 +143,6 @@ export function appendReviewComment(comment: StoredReviewComment, projectRoot: s
   const existing = loadReviewComments(projectRoot);
   existing.push(comment);
   appendFileSync(path, "", "utf-8"); // ensure file exists
-  const { writeFileSync } = require("node:fs") as typeof import("node:fs");
   writeFileSync(path, JSON.stringify(existing, null, 2), "utf-8");
 }
 

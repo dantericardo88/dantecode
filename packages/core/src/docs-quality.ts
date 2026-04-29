@@ -7,7 +7,7 @@
 // Pattern: Diataxis four-quadrant model (tutorials/how-to/reference/explanation)
 // ============================================================================
 
-import { existsSync, appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, appendFileSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -58,7 +58,7 @@ function findUndocumentedExports(sourceDir: string): string[] {
   let files: string[] = [];
   try {
     // Synchronous scan of .ts files in source dir (non-recursive for speed)
-    const entries = require("node:fs").readdirSync(sourceDir) as string[];
+    const entries = readdirSync(sourceDir);
     files = entries.filter((f: string) => f.endsWith(".ts") && !f.endsWith(".d.ts") && !f.endsWith(".test.ts"));
   } catch {
     return undocumented;

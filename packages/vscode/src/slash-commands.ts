@@ -6,16 +6,13 @@
 // Registered in sidebar HTML via Discord-style '/' prefix detection.
 // ============================================================================
 
-import { exec, spawn } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 
-// CRITICAL: use exec/spawn with shell mode (NOT execFile). VS Code/Antigravity
+// CRITICAL: use spawn with shell mode (NOT execFile). VS Code/Antigravity
 // extensions spawn child processes without the npm global bin dir on PATH, so
 // `execFile("danteforge", ...)` throws ENOENT. The shell-mode variants run
 // through cmd.exe / sh which inherits the user's full PATH. This fix has
 // regressed multiple times — keep it.
-const execAsync = promisify(exec);
-
 /**
  * Run a shell command with live stdout/stderr streaming via onChunk.
  * Resolves with the full combined output on exit. Used by `/score` and `/ascend`

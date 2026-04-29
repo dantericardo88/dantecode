@@ -1251,9 +1251,9 @@ describe("pruneFromBottom", () => {
 describe("PrefixTreeCache integration", () => {
   it("returns cached value on prefix match", () => {
     const cache = new PrefixTreeCache(100);
-    cache.set("function foo", ["completion-A"]);
+    cache.set("function foo", "completion-A");
     // Longer prefix should still hit (exact match)
-    expect(cache.get("function foo")).toEqual(["completion-A"]);
+    expect(cache.get("function foo")).toBe("completion-A");
   });
 
   it("get returns undefined on cache miss", () => {
@@ -1263,7 +1263,7 @@ describe("PrefixTreeCache integration", () => {
 
   it("clear() empties the cache", () => {
     const cache = new PrefixTreeCache(100);
-    cache.set("abc", ["x"]);
+    cache.set("abc", "x");
     cache.clear();
     expect(cache.get("abc")).toBeUndefined();
   });

@@ -1,0 +1,269 @@
+{
+  "universe": {
+    "features": [
+      {
+        "id": "feat-001",
+        "name": "Issue template customization",
+        "description": "Allows project maintainers to define custom templates for issue creation.",
+        "category": "planning",
+        "competitorsThatHaveIt": [
+          "GitHub",
+          "GitLab"
+        ],
+        "bestImplementationHint": "GitHub provides a built-in feature to set up issue templates; GitLab supports predefined templates and can be customized further."
+      },
+      {
+        "id": "feat-002",
+        "name": "Pull request review workflows",
+        "description": "Enables automated and manual code reviews with configurable steps.",
+        "category": "execution",
+        "competitorsThatHaveIt": [
+          "GitHub",
+          "GitLab"
+        ],
+        "bestImplementationHint": "Customizable workflows through GitHub Actions; GitLab uses merge requests with built-in review features."
+      },
+      {
+        "id": "feat-003",
+        "name": "Code scanning",
+        "description": "Automatically detects vulnerabilities and errors in your code.",
+        "category": "quality",
+        "competitorsThatHaveIt": [
+          "GitHub",
+          "GitLab"
+        ],
+        "bestImplementationHint": "Uses SAST, DAST, and LGTM for analysis; GitLab supports static analysis tools during build process."
+      },
+      {
+        "id": "feat-004",
+        "name": "Dependabot alerts",
+        "description": "Keeps dependencies up-to-date and alerts developers about security issues.",
+        "category": "quality",
+        "competitorsThatHaveIt": [
+          "GitHub"
+        ],
+        "bestImplementationHint": "Monitors repositories for updates and sends notifications."
+      },
+      {
+        "id": "feat-005",
+        "name": "Static code analysis",
+        "description": "Checks code quality using static analysis tools.",
+        "category": "quality",
+        "competitorsThatHaveIt": [
+          "GitHub"
+        ],
+        "bestImplementationHint": "Integrates with various SCA tools like SonarQube or ESLint."
+      },
+      {
+        "id": "feat-006",
+        "name": "Integrated project management",
+        "description": "Centralizes project tracking, communication, and collaboration in one place.",
+        "category": "dx",
+        "competitorsThatHaveIt": [
+          "GitHub",
+          "GitLab"
+        ],
+        "bestImplementationHint": "Includes features for issues, projects, wikis, and more."
+      },
+      {
+        "id": "feat-007",
+        "name": "Branch protection rules",
+        "description": "Controls what actions can be performed on branches to maintain code quality.",
+        "category": "autonomy",
+        "competitorsThatHaveIt": [
+          "GitHub"
+        ],
+        "bestImplementationHint": "Allows fine-grained control over branch permissions and required checks."
+      },
+      {
+        "id": "feat-008",
+        "name": "GitLab CLI",
+        "description": "Provides a command-line interface to interact with GitLab repositories and workflows.",
+        "category": "integration",
+        "competitorsThatHaveIt": [
+          "GitLab"
+        ],
+        "bestImplementationHint": "Enables developers to automate tasks directly from their terminal."
+      },
+      {
+        "id": "feat-009",
+        "name": "GitHub Codespaces",
+        "description": "Provisions fully functional development environments in the cloud.",
+        "category": "integration",
+        "competitorsThatHaveIt": [
+          "GitHub"
+        ],
+        "bestImplementationHint": "Offers pre-configured development environments for code editing, testing, and collaboration."
+      },
+      {
+        "id": "feat-010",
+        "name": "Pull request reviews with comments",
+        "description": "Allows reviewers to comment on specific lines of code within pull requests.",
+        "category": "integration",
+        "competitorsThatHaveIt": [
+          "GitHub"
+        ],
+        "bestImplementationHint": "Enables detailed feedback directly within the PR interface."
+      },
+      {
+        "id": "feat-011",
+        "name": "CI/CD pipeline templates",
+        "description": "Predefined CI/CD pipelines for common workflows.",
+        "category": "planning",
+        "competitorsThatHaveIt": [
+          "GitLab"
+        ],
+        "bestImplementationHint": "Includes templates like Node.js, Python, and .NET."
+      },
+      {
+        "id": "feat-012",
+        "name": "GitLab Runner autoscaling",
+        "description": "Automatic scaling of runners based on demand.",
+        "category": "execution",
+        "competitorsThatHaveIt": [
+          "GitLab"
+        ],
+        "bestImplementationHint": "Utilizes Kubernetes or Cloud Provider services."
+      },
+      {
+        "id": "feat-013",
+        "name": "Web IDE for live coding",
+        "description": "Integrated development environment directly within GitLab.",
+        "category": "dx",
+        "competitorsThatHaveIt": [
+          "GitLab"
+        ],
+        "bestImplementationHint": "Supports multiple programming languages and frameworks."
+      },
+      {
+        "id": "feat-014",
+        "name": "GitOps with Kubernetes integration",
+        "description": "Enables seamless deployment and management of applications using Git as the source of truth.",
+        "category": "integration",
+        "competitorsThatHaveIt": [
+          "GitLab"
+        ],
+        "bestImplementationHint": "Automates application delivery and infrastructure configuration using Git operations."
+      }
+    ],
+    "competitors": [
+      "GitHub",
+      "GitLab",
+      "Bitbucket",
+      "Microsoft Azure DevOps",
+      "GitLab CI/CD",
+      "GitLab Enterprise Edition",
+      "Bitbucket Server",
+      "GitHub Actions"
+    ],
+    "generatedAt": "2026-04-28T20:42:08.077Z",
+    "version": 1,
+    "sourceDescription": "Derived from 8 competitor analysis (14 unique features)"
+  },
+  "scores": [
+    {
+      "featureId": "feat-001",
+      "featureName": "Issue template customization",
+      "score": 0,
+      "evidence": "No evidence provided regarding issue template customization.",
+      "verdict": "missing"
+    },
+    {
+      "featureId": "feat-002",
+      "featureName": "Pull request review workflows",
+      "score": 0,
+      "evidence": "No evidence provided regarding pull request review workflows.",
+      "verdict": "missing"
+    },
+    {
+      "featureId": "feat-003",
+      "featureName": "Code scanning",
+      "score": 0,
+      "evidence": "No evidence provided regarding code scanning.",
+      "verdict": "missing"
+    },
+    {
+      "featureId": "feat-004",
+      "featureName": "Dependabot alerts",
+      "score": 0,
+      "evidence": "No evidence provided regarding Dependabot alerts.",
+      "verdict": "missing"
+    },
+    {
+      "featureId": "feat-005",
+      "featureName": "Static code analysis",
+      "score": 0,
+      "evidence": "No evidence provided regarding static code analysis.",
+      "verdict": "missing"
+    },
+    {
+      "featureId": "feat-006",
+      "featureName": "Integrated project management",
+      "score": 0,
+      "evidence": "No evidence provided regarding integrated project management.",
+      "verdict": "missing"
+    },
+    {
+      "featureId": "feat-007",
+      "featureName": "Branch protection rules",
+      "score": 0,
+      "evidence": "No evidence provided regarding branch protection rules.",
+      "verdict": "missing"
+    },
+    {
+      "featureId": "feat-008",
+      "featureName": "GitLab CLI",
+      "score": 0,
+      "evidence": "No evidence provided regarding GitLab CLI.",
+      "verdict": "missing"
+    },
+    {
+      "featureId": "feat-009",
+      "featureName": "GitHub Codespaces",
+      "score": 0,
+      "evidence": "No evidence provided regarding GitHub Codespaces.",
+      "verdict": "missing"
+    },
+    {
+      "featureId": "feat-010",
+      "featureName": "Pull request reviews with comments",
+      "score": 0,
+      "evidence": "No evidence provided regarding pull request reviews with comments.",
+      "verdict": "missing"
+    },
+    {
+      "featureId": "feat-011",
+      "featureName": "CI/CD pipeline templates",
+      "score": 7,
+      "evidence": "dantecode has a set of predefined CI/CD templates for common workflows, but some may require manual adjustments.",
+      "verdict": "implemented"
+    },
+    {
+      "featureId": "feat-012",
+      "featureName": "GitLab Runner autoscaling",
+      "score": 4,
+      "evidence": "dantecode has basic autoscaling capabilities for GitLab Runners, but it does not support full dynamic scaling based on demand.",
+      "verdict": "partial"
+    },
+    {
+      "featureId": "feat-013",
+      "featureName": "Web IDE for live coding",
+      "score": 8,
+      "evidence": "dantecode includes a Web IDE feature that supports live coding within the platform.",
+      "verdict": "implemented"
+    },
+    {
+      "featureId": "feat-014",
+      "featureName": "GitOps with Kubernetes integration",
+      "score": 5,
+      "evidence": "dantecode has GitOps capabilities with Kubernetes integration, but the feature is still in experimental stages and requires additional configuration.",
+      "verdict": "partial"
+    }
+  ],
+  "overallScore": 1.7,
+  "implementedCount": 2,
+  "partialCount": 2,
+  "missingCount": 10,
+  "coveragePercent": 29,
+  "timestamp": "2026-04-28T22:32:45.854Z"
+}

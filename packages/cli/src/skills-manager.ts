@@ -48,7 +48,7 @@ class SkillsManager {
           }
         }
       }
-    } catch (e) {
+    } catch {
       // Plugins directory doesn't exist — that's fine
     }
   }

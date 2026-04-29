@@ -35,9 +35,19 @@ Make the smallest change that fixes the issue. Prefer:
 - Modifying existing logic over adding new functions
 - Fixing the root cause over adding workarounds
 - Preserving existing API contracts
+- Editing only files needed for the observed failing tests
+- Avoiding broad refactors, formatting churn, dependency changes, or test rewrites
+
+If the first patch fails verification, keep the retry narrow:
+- Read the new failure output before changing code again
+- Preserve the parts of the patch that already moved the failure forward
+- Replace only the smallest wrong assumption
+- Never use the gold patch, benchmark metadata, or hidden expected answer as guidance
 
 ## Step 5: Verify
 Run the tests again and confirm FAIL_TO_PASS tests now pass:
 ```bash
 python -m pytest {test_files} -x
 ```
+
+Then run the relevant PASS_TO_PASS tests when provided. Submit only after the patch is minimal, the target tests pass, and the final diff has been inspected.

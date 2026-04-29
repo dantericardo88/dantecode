@@ -3,6 +3,13 @@
 // Tests: partialAcceptFirstHunk, enhanced status bar text, package.json keybinding
 
 import { describe, it, expect, vi } from "vitest";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+
+const extensionPackagePath = existsSync(resolve(process.cwd(), "packages/vscode/package.json"))
+  ? resolve(process.cwd(), "packages/vscode/package.json")
+  : resolve(process.cwd(), "package.json");
 
 // ── vscode mock ───────────────────────────────────────────────────────────────
 vi.mock("vscode", () => ({
@@ -184,16 +191,14 @@ describe("InlineEditProvider — enhanced status bar", () => {
 
 describe("package.json — partialAcceptInlineEdit keybinding", () => {
   it("package.json contains partialAcceptInlineEdit command declaration", async () => {
-    const { readFile } = await import("node:fs/promises");
-    const pkgRaw = await readFile("package.json", "utf-8");
+    const pkgRaw = await readFile(extensionPackagePath, "utf-8");
     const pkg = JSON.parse(pkgRaw) as { contributes: { commands: Array<{ command: string }> } };
     const commands = pkg.contributes.commands.map((c) => c.command);
     expect(commands).toContain("dantecode.partialAcceptInlineEdit");
   });
 
   it("package.json keybindings contain shift+tab for partialAcceptInlineEdit", async () => {
-    const { readFile } = await import("node:fs/promises");
-    const pkgRaw = await readFile("package.json", "utf-8");
+    const pkgRaw = await readFile(extensionPackagePath, "utf-8");
     const pkg = JSON.parse(pkgRaw) as { contributes: { keybindings: Array<{ command: string; key: string }> } };
     const binding = pkg.contributes.keybindings.find((b) => b.command === "dantecode.partialAcceptInlineEdit");
     expect(binding).toBeDefined();

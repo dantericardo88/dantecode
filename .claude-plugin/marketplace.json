@@ -1,0 +1,9 @@
+{
+  "name": "dantecode",
+  "displayName": "DanteCode",
+  "description": "Portable, model-agnostic skill runtime and coding agent with DanteForge verification compiled in",
+  "version": "1.0.0",
+  "category": "coding-agent",
+  "subcategories": ["skill-runtime", "verification", "quality-gates"],
+  "tags": ["skills", "pdse", "anti-stub", "constitution", "mcp"]
+}

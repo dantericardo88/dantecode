@@ -40,6 +40,8 @@ import * as fsMock from "node:fs/promises";
 import { createReadStream as createReadStreamMock } from "node:fs";
 import { createInterface as createInterfaceMock } from "node:readline";
 
+type ReadlineCallback = (line?: string) => void;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -96,7 +98,7 @@ describe("swe-bench-runner", () => {
 
       // Mock readline / createReadStream
       const mockEmitter = {
-        on: vi.fn((event: string, cb: Function) => {
+        on: vi.fn((event: string, cb: ReadlineCallback) => {
           if (event === "line") {
             for (const line of mockLines) cb(line);
           }
@@ -126,7 +128,7 @@ describe("swe-bench-runner", () => {
       ];
 
       const mockEmitter = {
-        on: vi.fn((event: string, cb: Function) => {
+        on: vi.fn((event: string, cb: ReadlineCallback) => {
           if (event === "line") {
             for (const line of mockLines) cb(line);
           }
@@ -162,9 +164,7 @@ describe("swe-bench-runner", () => {
     });
 
     it("returns resolved:true when tests pass", async () => {
-      let callCount = 0;
       vi.mocked(execFileMock).mockImplementation((_cmd: any, _args: any, _opts: any, cb: any) => {
-        callCount++;
         const callback = typeof _opts === "function" ? _opts : cb;
         // First several calls succeed (clone, checkout, pip install, patch, diff)
         // pytest call succeeds (exit 0)
@@ -178,10 +178,8 @@ describe("swe-bench-runner", () => {
 
     it("captures model_patch from git diff output", async () => {
       const diffOutput = "diff --git a/fix.py b/fix.py\n+# fixed";
-      let callIdx = 0;
 
       vi.mocked(execFileMock).mockImplementation((_cmd: any, args: any, _opts: any, cb: any) => {
-        callIdx++;
         const callback = typeof _opts === "function" ? _opts : cb;
         // The git diff call returns our diff; everything else succeeds
         const isGitDiff = Array.isArray(args) && args.includes("diff");
@@ -195,9 +193,7 @@ describe("swe-bench-runner", () => {
     });
 
     it("returns resolved:false when tests fail", async () => {
-      let callIdx = 0;
       vi.mocked(execFileMock).mockImplementation((_cmd: any, args: any, _opts: any, cb: any) => {
-        callIdx++;
         const callback = typeof _opts === "function" ? _opts : cb;
         // pytest exits with code 1
         const isPytest = Array.isArray(args) && args.includes("pytest");
@@ -215,9 +211,7 @@ describe("swe-bench-runner", () => {
     });
 
     it("handles test_patch apply failure gracefully", async () => {
-      let callIdx = 0;
       vi.mocked(execFileMock).mockImplementation((_cmd: any, args: any, _opts: any, cb: any) => {
-        callIdx++;
         const callback = typeof _opts === "function" ? _opts : cb;
         // git apply fails
         const isGitApply = Array.isArray(args) && args.includes("apply");

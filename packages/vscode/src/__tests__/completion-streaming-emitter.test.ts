@@ -3,11 +3,10 @@
 // 10 tests for CompletionStreamingEmitter and EmitterRegistry.
 // ============================================================================
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   CompletionStreamingEmitter,
   EmitterRegistry,
-  globalEmitterRegistry,
 } from "../completion-streaming-emitter.js";
 
 /** Helper: create an AsyncIterable from an array of string chunks */

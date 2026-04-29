@@ -96,7 +96,7 @@ async function generateFileGraph(projectRoot: string, repoMap: any[]): Promise<F
         exports,
         symbols,
       });
-    } catch (e) {
+    } catch {
       // Skip files that can't be read
     }
   }
@@ -169,7 +169,7 @@ async function generateSymbolGraph(projectRoot: string, repoMap: any[]): Promise
           references: [], // TODO: analyze references
         });
       }
-    } catch (e) {
+    } catch {
       // Skip
     }
   }
@@ -222,7 +222,7 @@ export async function loadRepoMemory(projectRoot: string): Promise<RepoMemory | 
   try {
     const data = await readFile(join(projectRoot, REPO_MEMORY_PATH), "utf-8");
     return JSON.parse(data);
-  } catch (e) {
+  } catch {
     return null;
   }
 }

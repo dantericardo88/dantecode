@@ -16,6 +16,7 @@ import { BackgroundAgentRunner } from "./background-agent.js";
 const TEST_GITHUB_SECRET = "test-github-secret";
 const TEST_SLACK_SECRET = "test-slack-secret";
 const TEST_API_TOKEN = "test-bearer-token-abc";
+const COVERAGE_HTTP_TIMEOUT_MS = 15_000;
 
 /** Make an HTTP request to the test server and return { status, body }. */
 function httpRequest(
@@ -232,7 +233,7 @@ describe("WebhookServer", () => {
       expect(body.accepted).toBe(true);
       expect(body.taskId).toBeTruthy();
       expect(body.source).toBe("slack");
-    });
+    }, COVERAGE_HTTP_TIMEOUT_MS);
 
     it("returns 401 for an invalid Slack signature", async () => {
       const timestamp = String(Math.floor(Date.now() / 1000));
@@ -285,7 +286,7 @@ describe("WebhookServer", () => {
 
       expect(status).toBe(401);
       expect(body.error).toBe("Unauthorized");
-    });
+    }, COVERAGE_HTTP_TIMEOUT_MS);
 
     it("returns 400 for missing prompt", async () => {
       const payload = JSON.stringify({ notAPrompt: true });
@@ -307,14 +308,14 @@ describe("WebhookServer", () => {
 
       expect(status).toBe(404);
       expect(body.error).toBe("Not found");
-    });
+    }, COVERAGE_HTTP_TIMEOUT_MS);
 
     it("returns 404 for GET on webhook endpoints", async () => {
       const { status, body } = await httpRequest(port, "GET", "/webhooks/github");
 
       expect(status).toBe(404);
       expect(body.error).toBe("Not found");
-    });
+    }, COVERAGE_HTTP_TIMEOUT_MS);
   });
 });
 

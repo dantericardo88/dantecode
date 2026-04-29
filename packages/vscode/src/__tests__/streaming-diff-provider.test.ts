@@ -278,7 +278,7 @@ describe("StreamingDiffProvider", () => {
     provider.feedChunk(srBlock("src/app.ts", "old", "new"));
 
     expect(capturedOpts).not.toBeNull();
-    const bg = (capturedOpts as import("vscode").DecorationRenderOptions).backgroundColor;
+    const bg = (capturedOpts as unknown as import("vscode").DecorationRenderOptions).backgroundColor;
     expect((bg as { id: string }).id).toBe("diffEditor.removedLineBackground");
   });
 });

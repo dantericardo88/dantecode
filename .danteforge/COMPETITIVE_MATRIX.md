@@ -9,10 +9,10 @@ has evidence that would convince a skeptical outsider.
 
 | Metric | Value |
 |---|---:|
-| DanteCode current harsh score | 293.7 / 500 |
-| DanteCode current average | 5.87 / 10 |
+| DanteCode current harsh score | 303.2 / 500 |
+| DanteCode current average | 6.06 / 10 |
 | Target for "9s across the board" | 450 / 500 |
-| Remaining lift to target | 156.3 dimension-points |
+| Remaining lift to target | 146.8 dimension-points |
 | Matrix dimensions | 50 |
 | Machine-readable matrix | `.danteforge/compete/matrix.json` |
 | Machine-readable rubric | `.danteforge/rubric.json` |
@@ -64,7 +64,7 @@ used to decide what to learn next and where DanteCode is behind.
 | 11 | Aider | OSS | 7.0 | Best OSS teacher for git-native terminal editing, repo map, and disciplined diffs. |
 | 12 | Continue | OSS | 7.0 | Best OSS teacher for model/provider portability, IDE assistant architecture, and context configuration. |
 | 13 | Kilo Code / Roo Code | OSS | 6.8 | Fast OSS iteration around agent modes, sessions, reviews, and IDE workflows. |
-| 14 | DanteCode | Local | 5.9 | Strong foundation and verification culture, now materially stronger on accessibility, but still weak on public proof, UX polish, breadth, and green release gates. |
+| 14 | DanteCode | Local | 6.1 | Strong foundation and verification culture, now materially stronger on accessibility, regression gates, and benchmark transparency, but still weak on SWE-bench correctness, UX polish, breadth, and enterprise posture. |
 
 ## Full 50-Dimension Matrix
 
@@ -103,7 +103,7 @@ used to decide what to learn next and where DanteCode is behind.
 | context_governance | Context governance | context | 5.5 | GitHub Copilot 8.5 | Continue 7.5 | 3.5 | Cite context, scope it, expire it, dedupe it, let users inspect it, and measure context usefulness. |
 | human_agent_collaboration | Human-agent collaboration | collaboration | 5.2 | Cursor 9.0 | Cline 8.0 | 3.8 | Allow interruption, steering, shared editing, task handoff, pause/resume, and multi-agent visibility. |
 | task_decomposition_quality | Task decomposition quality | planning | 6.2 | Devin 9.0 | OpenHands 8.0 | 2.8 | Turn vague tasks into dependency-aware, verifiable subtasks and prove completion quality. |
-| regression_prevention | Regression prevention | quality | 5.0 | Cursor 9.0 | Semgrep 8.0 | 4.0 | Keep all release gates green, add regression dashboards, and block score claims when typecheck/lint fail. |
+| regression_prevention | Regression prevention | quality | 9.0 | Cursor 9.0 | Semgrep 8.0 | 0.0 | Score-claim gate passed with green typecheck, lint, test, coverage, and frontier-gap evidence, zero blocking failures, and zero waiver errors. |
 | onboarding_time_to_value | Onboarding / time-to-value | adoption | 4.5 | Cursor 9.0 | Continue 7.0 | 4.5 | Prove first successful task in under 10 minutes on a fresh machine and fresh repo. |
 | ecosystem_portability | Ecosystem portability | ecosystem | 6.5 | OpenAI Codex 8.0 | Continue 8.5 | 2.5 | Run consistently across CLI, VS Code, CI, local/cloud models, MCP, and hosted workflows. |
 | model_quality_adaptation | Model quality adaptation | models | 6.4 | OpenAI Codex 9.0 | LiteLLM 8.5 | 2.6 | Adapt model, prompt, budget, and retry policy by task type, failures, and measured outcomes. |
@@ -114,7 +114,7 @@ used to decide what to learn next and where DanteCode is behind.
 | data_privacy_controls | Data/privacy controls | safety | 6.2 | GitHub Copilot 9.0 | Presidio 8.5 | 2.8 | Add redaction, retention controls, telemetry opt-out, local-only mode, and admin-enforced privacy policy. |
 | documentation_quality | Documentation quality | adoption | 6.4 | OpenAI Codex 9.0 | Docusaurus 8.0 | 2.6 | Ship public docs with quickstart, recipes, troubleshooting, API docs, architecture, and migration guides. |
 | extensibility_developer_experience | Extensibility developer experience | ecosystem | 6.5 | Claude Code 9.0 | Continue 8.0 | 2.5 | Give extension authors templates, tests, manifests, local dev server, validation, docs, and publish path. |
-| benchmark_transparency | Benchmark transparency | evaluation | 3.5 | OpenAI Codex 9.0 | SWE-agent 9.0 | 5.5 | Publish commands, seeds, traces, pass/fail logs, score history, and limitations for every benchmark claim. |
+| benchmark_transparency | Benchmark transparency | evaluation | 9.0 | OpenAI Codex 9.0 | SWE-agent 9.0 | 0.0 | Verified local proof: `dantecode bench transparency --suite builtin --seed 45 --output-dir benchmarks/transparency --evidence --format json` produced command, seed, dataset hash, raw report, markdown report, selected instances, per-instance logs, trace refs, checksums, score history, limitations, and Dim45 evidence. |
 | multi_repo_monorepo_scale | Multi-repo / monorepo scale | scale | 5.5 | Sourcegraph Cody 9.5 | Nx 8.0 | 3.5 | Handle huge repos, workspace graphs, dependency boundaries, and cross-repo changes with measured retrieval quality. |
 | language_framework_breadth | Language/framework breadth | scale | 4.8 | GitHub Copilot 9.0 | Aider 8.0 | 4.2 | Prove useful repair and generation across TypeScript, Python, Go, Java, Rust, C#, PHP, and common frameworks. |
 | accessibility_inclusive_ux | Accessibility / inclusive UX | ux | 9.0 | GitHub Copilot 8.0 | axe-core 9.0 | 0.0 | Shared gate, CLI audit, VS Code webview hardening, trend log, and evidence artifacts now cover keyboard, screen reader, contrast, high contrast, reduced motion, focus order, and live regions. |
@@ -127,14 +127,14 @@ These dimensions create the most score lift and credibility risk:
 
 1. SWE-bench / correctness: 3.5, gap 5.5.
 2. Enterprise readiness: 3.5, gap 5.5.
-3. Benchmark transparency: 3.5, gap 5.5.
-4. Screenshot -> code: 4.0, gap 5.0.
-5. Browser live preview: 4.0, gap 5.0.
-6. Onboarding / time-to-value: 4.5, gap 4.5.
-7. Configuration ergonomics: 4.8, gap 4.2.
-8. Language/framework breadth: 4.8, gap 4.2.
-9. Deployment / environment intelligence: 4.8, gap 4.2.
-10. Regression prevention: 5.0, gap 4.0.
+3. Screenshot -> code: 4.0, gap 5.0.
+4. Browser live preview: 4.0, gap 5.0.
+5. Onboarding / time-to-value: 4.5, gap 4.5.
+6. Configuration ergonomics: 4.8, gap 4.2.
+7. Language/framework breadth: 4.8, gap 4.2.
+8. Deployment / environment intelligence: 4.8, gap 4.2.
+9. Browser / computer use: 5.2, gap 3.8.
+10. Human-agent collaboration: 5.2, gap 3.8.
 
 ## What To Learn From OSS First
 

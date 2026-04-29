@@ -11,8 +11,6 @@ const mockSkipDispose = vi.fn();
 let decorationTypeCallCount = 0;
 const decorationTypeDisposeFns = [mockPassDispose, mockFailDispose, mockSkipDispose];
 
-const mockSetDecorations = vi.fn();
-
 vi.mock("vscode", () => ({
   window: {
     createTextEditorDecorationType: vi.fn().mockImplementation(() => {
@@ -38,7 +36,7 @@ vi.mock("vscode", () => ({
 // Mutable list of visible editors for tests
 let mockVisibleEditors: Array<{
   document: { uri: { fsPath: string } };
-  setDecorations: typeof mockSetDecorations;
+  setDecorations: ReturnType<typeof vi.fn>;
 }> = [];
 
 import { createTestDecorationManager, parseVitestResults } from "../test-decoration-manager.js";

@@ -6,8 +6,6 @@
 import { describe, it, expect } from "vitest";
 import {
   FimContextBudget,
-  BUDGET_8K,
-  BUDGET_32K,
   BUDGET_128K,
 } from "../fim-context-budget.js";
 

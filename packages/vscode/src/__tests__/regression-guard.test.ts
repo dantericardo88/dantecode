@@ -463,9 +463,9 @@ describe("regression guard — ascend orchestrator wiring", () => {
     // FIX: track commitsMade and totalLinesChanged; differentiate
     // "model isn't editing" (commits == 0) from "edits landed but harsh-scorer
     // can't measure them on this codebase size" (commits > 0).
-    // (After 2026-04-28 extraction these counters live in orchestrator's runAscendLoopCore.)
-    expect(orch).toMatch(/let\s+commitsMade\s*=\s*0/);
-    expect(orch).toMatch(/let\s+totalLinesChanged\s*=\s*0/);
+    // (After helper extraction these counters live in AscendRunProgress.)
+    expect(orch).toMatch(/commitsMade:\s*0/);
+    expect(orch).toMatch(/totalLinesChanged:\s*0/);
     // After 2026-04-29 helper extraction: commitsMade is incremented via the
     // commitAscendCycle helper which returns { commitsMade: 0 | 1 }. The
     // orchestrator does `commitsMade += commitResult.commitsMade`. Either

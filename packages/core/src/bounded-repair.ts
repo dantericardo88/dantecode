@@ -67,7 +67,7 @@ export async function classifyFailure(
   // Classify based on error type
   let category: FailureClassification["category"] = "unknown";
   let severity: FailureClassification["severity"] = "medium";
-  let actionable = true;
+  const actionable = true;
 
   if (primaryError.errorType === "typescript" || primaryError.errorType === "syntax") {
     category = "compile";
@@ -173,7 +173,7 @@ export async function rollbackChanges(projectRoot: string): Promise<boolean> {
   try {
     execSync("git reset --hard HEAD~1", { cwd: projectRoot });
     return true;
-  } catch (e) {
+  } catch {
     return false;
   }
 }
@@ -184,7 +184,7 @@ export async function verifyAfterRepair(projectRoot: string): Promise<boolean> {
     execSync("npm run typecheck", { cwd: projectRoot });
     execSync("npm run lint", { cwd: projectRoot });
     return true;
-  } catch (e) {
+  } catch {
     return false;
   }
 }

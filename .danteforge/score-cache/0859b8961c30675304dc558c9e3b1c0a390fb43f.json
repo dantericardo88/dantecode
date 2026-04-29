@@ -1,0 +1,27 @@
+{
+  "overall": 8.1,
+  "dimensions": {
+    "functionality": 7.6,
+    "testing": 8.5,
+    "errorHandling": 9.5,
+    "security": 8.5,
+    "uxPolish": 9,
+    "documentation": 7.1,
+    "performance": 8,
+    "maintainability": 5.7,
+    "developerExperience": 7,
+    "autonomy": 10,
+    "planningQuality": 10,
+    "selfImprovement": 8.3,
+    "specDrivenPipeline": 8.5,
+    "convergenceSelfHealing": 9.5,
+    "tokenEconomy": 9,
+    "contextEconomy": 5,
+    "ecosystemMcp": 9,
+    "enterpriseReadiness": 9,
+    "communityAdoption": 1.5
+  },
+  "computedAt": "2026-04-29T15:47:32-04:00",
+  "gitSha": "0859b8961c30675304dc558c9e3b1c0a390fb43f",
+  "source": "canonical-v1"
+}

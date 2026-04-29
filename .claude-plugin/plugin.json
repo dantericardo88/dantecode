@@ -1,0 +1,29 @@
+{
+  "name": "dantecode",
+  "description": "Portable, model-agnostic skill runtime and coding agent with DanteForge verification (PDSE scoring, anti-stub gate, constitution checks, GStack validation). Exposes 7 quality-gate MCP tools for use across Claude Code / Cursor / any MCP client.",
+  "version": "1.0.0",
+  "author": {
+    "name": "DanteCode Contributors",
+    "email": "noreply@danteforge.dev"
+  },
+  "homepage": "https://github.com/danteforge/dantecode",
+  "repository": "https://github.com/danteforge/dantecode",
+  "license": "MIT",
+  "keywords": [
+    "skills",
+    "coding-agent",
+    "verification",
+    "pdse",
+    "anti-stub",
+    "constitution",
+    "mcp",
+    "model-agnostic"
+  ],
+  "mcpServers": {
+    "dantecode": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/packages/mcp/dist/cli.js"],
+      "env": {}
+    }
+  }
+}

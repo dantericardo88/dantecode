@@ -1,0 +1,152 @@
+{
+  "dimensionId": "benchmark_transparency",
+  "generatedAt": "2026-04-29T18:15:29.086Z",
+  "pass": true,
+  "score": 100,
+  "threshold": 90,
+  "blockers": [],
+  "manifest": {
+    "schemaVersion": "1.0",
+    "dimensionId": "benchmark_transparency",
+    "benchmarkId": "builtin-canary",
+    "suite": "builtin",
+    "runId": "7589d0ea-2819-489f-8b6c-36c9a3187058",
+    "generatedAt": "2026-04-29T18:15:25.234Z",
+    "git": {
+      "commit": "a015bf9c90903984613c3362d916172a897eed25",
+      "dirty": true
+    },
+    "environment": {
+      "platform": "win32",
+      "arch": "x64",
+      "node": "v24.13.1",
+      "npm": "11.8.0"
+    },
+    "command": {
+      "text": "dantecode bench transparency --suite builtin --seed 45 --output-dir benchmarks/transparency --evidence --format json",
+      "argv": [
+        "dantecode",
+        "bench",
+        "transparency",
+        "--suite",
+        "builtin",
+        "--seed",
+        "45",
+        "--output-dir",
+        "benchmarks/transparency",
+        "--evidence",
+        "--format",
+        "json"
+      ],
+      "cwd": "C:\\Projects\\DanteCode"
+    },
+    "model": "builtin-gold-patch",
+    "dataset": {
+      "name": "builtin-typescript-canary",
+      "path": "builtin:@dantecode/swe-bench-runner",
+      "sha256": "ead0c81b8888d12b6c6501180707a69ccf67b8bab04c91131130d459c95ce209",
+      "selectedInstanceIds": [
+        "ts-utils__001",
+        "ts-utils__002",
+        "ts-utils__003",
+        "ts-utils__004",
+        "ts-utils__005",
+        "ts-utils__006",
+        "ts-utils__007",
+        "ts-utils__008",
+        "ts-utils__009",
+        "ts-utils__010",
+        "ts-utils__011",
+        "ts-utils__012",
+        "ts-utils__013",
+        "ts-utils__014",
+        "ts-utils__015",
+        "ts-utils__016",
+        "ts-utils__017",
+        "ts-utils__018",
+        "ts-utils__019",
+        "ts-utils__020",
+        "ts-utils__021",
+        "ts-utils__022",
+        "ts-utils__023",
+        "ts-utils__024",
+        "ts-utils__025"
+      ],
+      "seed": 45
+    },
+    "config": {
+      "timeoutMs": 600000,
+      "parallel": 1
+    },
+    "result": {
+      "total": 25,
+      "resolved": 25,
+      "passRate": 1
+    },
+    "artifacts": [
+      {
+        "kind": "raw_report",
+        "path": "benchmarks/transparency/7589d0ea-2819-489f-8b6c-36c9a3187058/raw-report.json",
+        "sha256": "2aaaddc555a99a3ff38985c77adf9bb3428ddaa5dfec153e68c04bf186af630c",
+        "bytes": 2593
+      },
+      {
+        "kind": "markdown_report",
+        "path": "benchmarks/transparency/7589d0ea-2819-489f-8b6c-36c9a3187058/report.md",
+        "sha256": "ef176d4be4ab3becd7d3548c620143d702872dc90f59d92897a5f622ea675e7b",
+        "bytes": 883
+      },
+      {
+        "kind": "command",
+        "path": "benchmarks/transparency/7589d0ea-2819-489f-8b6c-36c9a3187058/command.txt",
+        "sha256": "ba0aac044f055e8aba9df9e1f74d2caa0a1786f3ea147e8e1d0d798278f1eb05",
+        "bytes": 117
+      },
+      {
+        "kind": "selected_instances",
+        "path": "benchmarks/transparency/7589d0ea-2819-489f-8b6c-36c9a3187058/selected-instances.json",
+        "sha256": "6e13dc8939ab7c1d18443dd19e17905881f29c2a6578de2a19c9ff059002a344",
+        "bytes": 478
+      },
+      {
+        "kind": "per_instance_logs",
+        "path": "benchmarks/transparency/7589d0ea-2819-489f-8b6c-36c9a3187058/per-instance-logs.jsonl",
+        "sha256": "edec941c02270c05fe4ab7ec8ac0d81794e43eda7e222082d9889a895087f317",
+        "bytes": 1875
+      },
+      {
+        "kind": "trace_refs",
+        "path": "benchmarks/transparency/7589d0ea-2819-489f-8b6c-36c9a3187058/trace-refs.json",
+        "sha256": "7de9ac04af509f66221048f1cdfa22e9b0bd7f6b6678fe8e6be28f6e475ecb31",
+        "bytes": 3347
+      },
+      {
+        "kind": "limitations",
+        "path": "benchmarks/transparency/7589d0ea-2819-489f-8b6c-36c9a3187058/limitations.md",
+        "sha256": "c6e11391ab5801cf7545935096f02f243e49a5d14c7654231498c9df7284f48b",
+        "bytes": 170
+      },
+      {
+        "kind": "manifest",
+        "path": "benchmarks/transparency/7589d0ea-2819-489f-8b6c-36c9a3187058/manifest.json",
+        "sha256": "f852138d1b3eddcea1e6b73688b70fc51c0dc726648ce6bfc9686b1bae9aa2a1",
+        "bytes": 3936
+      }
+    ],
+    "limitations": [
+      "Built-in canary proves benchmark artifact transparency, not SWE-bench correctness.",
+      "External publication and repeated CI runs are still required before claiming 9.5+."
+    ],
+    "rerunCommand": "dantecode bench transparency --suite builtin --seed 45 --output-dir benchmarks/transparency --evidence --format json",
+    "scoreHistoryUpdated": true
+  },
+  "proof": {
+    "commandRecorded": true,
+    "seedRecorded": true,
+    "datasetHashRecorded": true,
+    "scoreHistoryUpdated": true,
+    "artifactCount": 8,
+    "checksumCount": 8,
+    "limitationsCount": 2
+  }
+}

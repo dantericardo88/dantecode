@@ -22,6 +22,10 @@ import {
 } from "@dantecode/core";
 import { getReproducedTranche } from "../swe-bench-runner.js";
 
+const repoRoot = existsSync(resolve(process.cwd(), "bench-results.json"))
+  ? process.cwd()
+  : resolve(process.cwd(), "../..");
+
 function makeDir(): string {
   const dir = join(tmpdir(), `sprint-au-${randomUUID()}`);
   mkdirSync(dir, { recursive: true });
@@ -109,8 +113,7 @@ describe("getFinishRateStats — Sprint AU (dim 15)", () => {
 });
 
 describe("bench-results.json reproduced_tranche — Sprint AU (dim 5)", () => {
-  // bench-results.json is in the repo root, 2 levels above packages/cli
-  const benchPath = resolve(process.cwd(), "../../bench-results.json");
+  const benchPath = resolve(repoRoot, "bench-results.json");
 
   // Extra: getReproducedTranche reads the tranche array
   it("getReproducedTranche returns an array of tranche entries", () => {

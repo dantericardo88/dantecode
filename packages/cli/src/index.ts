@@ -15,6 +15,8 @@ import { runGitCommand } from "./commands/git.js";
 import { runSelfUpdateCommand } from "./commands/self-update.js";
 import { runBenchCommand } from "./commands/bench.js";
 import { runA11yCommand } from "./a11y-command.js";
+import { runRegressionCommand } from "./regression-command.js";
+import { runPreviewCommand } from "./preview-command.js";
 
 // ----------------------------------------------------------------------------
 // Version
@@ -88,6 +90,8 @@ const COMMANDS = new Set([
   "self-update",
   "bench",
   "a11y",
+  "regression",
+  "preview",
 ]);
 
 /**
@@ -261,10 +265,20 @@ async function main(): Promise<void> {
         });
         return;
       case "bench":
-        await runBenchCommand(parsed.subArgs, projectRoot);
+        process.exitCode = await runBenchCommand(parsed.subArgs, projectRoot);
         return;
       case "a11y": {
         const code = await runA11yCommand(parsed.subArgs, { cwd: projectRoot });
+        process.exitCode = code;
+        return;
+      }
+      case "regression": {
+        const code = await runRegressionCommand(parsed.subArgs, { cwd: projectRoot });
+        process.exitCode = code;
+        return;
+      }
+      case "preview": {
+        const code = await runPreviewCommand(parsed.subArgs, { cwd: projectRoot });
         process.exitCode = code;
         return;
       }

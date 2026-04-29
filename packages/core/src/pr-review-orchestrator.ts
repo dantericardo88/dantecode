@@ -1,6 +1,6 @@
 // packages/core/src/pr-review-orchestrator.ts
 // ─── Review outcome tracking (dim 18) — imports ──────────────────────────────
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 // PR review orchestration layer — closes dim 18 (PR automation: 8→9).
 //
@@ -772,7 +772,6 @@ export class ReviewQualityBenchmark {
 
   load(): ReviewQualityResult[] {
     try {
-      const { readFileSync, existsSync } = require("node:fs") as typeof import("node:fs");
       if (!existsSync(this._logPath)) return [];
       return readFileSync(this._logPath, "utf-8")
         .trim()

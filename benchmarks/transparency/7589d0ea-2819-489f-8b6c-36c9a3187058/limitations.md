@@ -1,0 +1,2 @@
+- Built-in canary proves benchmark artifact transparency, not SWE-bench correctness.
+- External publication and repeated CI runs are still required before claiming 9.5+.

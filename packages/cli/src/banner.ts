@@ -114,6 +114,8 @@ ${BOLD}COMMANDS${RESET}
   agent               Manage agents (list, run, create)
   config              View/edit configuration (init, show, set, models)
   git                 Git operations (status, log, diff)
+  preview             Run Dimension 14 browser-live-preview gates
+  regression          Run Dimension 34 regression-prevention gates
 
 ${BOLD}OPTIONS${RESET}
   --model <id>        Override the default model (e.g. grok/grok-3, anthropic/claude-sonnet-4-20250514)

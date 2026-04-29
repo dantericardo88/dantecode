@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as statusBar from './status-bar.js';
 import { DEFAULT_MODEL_ID } from '@dantecode/core';
 

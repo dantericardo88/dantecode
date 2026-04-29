@@ -1,0 +1,1 @@
+dantecode bench transparency --suite builtin --seed 45 --output-dir benchmarks/transparency --evidence --format json

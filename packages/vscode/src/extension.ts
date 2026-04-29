@@ -6,7 +6,7 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
-import { existsSync, unlinkSync } from "node:fs";
+import { appendFileSync, existsSync, unlinkSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { DEFAULT_MODEL_ID, MODEL_CATALOG, detectInstallContext, setEditQualityOutputHook } from "@dantecode/core";
 
@@ -107,8 +107,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // whether activation is firing, succeeding, or crashing partway through.
   // If the chat panel is blank, the answer is in this log.
   try {
-    const fs = require("fs") as typeof import("fs");
-    fs.appendFileSync(
+    appendFileSync(
       "C:/tmp/dante-bypass.log",
       `[${new Date().toISOString()}] activate() ENTERED\n`,
     );
@@ -116,8 +115,7 @@ export function activate(context: vscode.ExtensionContext): void {
   try {
     activateInner(context);
     try {
-      const fs = require("fs") as typeof import("fs");
-      fs.appendFileSync(
+      appendFileSync(
         "C:/tmp/dante-bypass.log",
         `[${new Date().toISOString()}] activate() COMPLETED\n`,
       );
@@ -126,8 +124,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const msg = activationErr instanceof Error ? activationErr.message : String(activationErr);
     const stack = activationErr instanceof Error ? activationErr.stack ?? "" : "";
     try {
-      const fs = require("fs") as typeof import("fs");
-      fs.appendFileSync(
+      appendFileSync(
         "C:/tmp/dante-bypass.log",
         `[${new Date().toISOString()}] activate() THREW: ${msg}\n${stack}\n`,
       );
@@ -238,8 +235,7 @@ function setupTerminalCapture(context: vscode.ExtensionContext): void {
     // Proposed-API not enabled. Log and continue — the rest of the extension
     // works fine without terminal-output capture.
     try {
-      const fs = require("fs") as typeof import("fs");
-      fs.appendFileSync(
+      appendFileSync(
         "C:/tmp/dante-bypass.log",
         `[${new Date().toISOString()}] terminal-data API unavailable (proposal not enabled): ${String(terminalApiErr)}\n`,
       );
@@ -530,6 +526,7 @@ function buildSidebarCallbacks(): {
   onModelChange: (model: string) => void;
   onStatusBarUpdate: (info: import("./status-bar.js").StatusBarInfo) => void;
   onCircuitStateChange: (isOpen: boolean) => void;
+  onOutputLine: (line: string) => void;
 } {
   return {
     onCostUpdate: ({ model, modelTier, sessionTotalUsd }) => {
@@ -553,6 +550,9 @@ function buildSidebarCallbacks(): {
     },
     onCircuitStateChange: (isOpen) => {
       updateCircuitBreakerBar(isOpen);
+    },
+    onOutputLine: (line) => {
+      danteOutputChannel?.appendLine(line);
     },
   };
 }

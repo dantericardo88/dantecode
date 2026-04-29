@@ -10,7 +10,9 @@ import {
   resolve as pathResolve,
   relative as pathRelative,
   basename as pathBasename,
+  join as pathJoin,
 } from "node:path";
+import { appendFileSync, existsSync, unlinkSync } from "node:fs";
 import type {
   ChatSessionFile,
   ModelConfig,
@@ -186,6 +188,7 @@ interface SidebarHostCallbacks {
   }) => void;
   onSearchReplaceBlocks?: (blocks: SearchReplaceBlock[]) => void;
   onCircuitStateChange?: (isOpen: boolean) => void;
+  onOutputLine?: (line: string) => void;
 }
 
 /** Default config for new users. */
@@ -322,7 +325,6 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   private pendingImages: string[] = [];
   private agentConfig: AgentConfig = { ...DEFAULT_AGENT_CONFIG };
   private readonly diffContents = new Map<string, string>();
-  private readonly outputChannel?: Pick<vscode.OutputChannel, "appendLine">;
   private sessionStore: SessionStore | null = null;
   private sessionStoreMigrated = false;
   private activeTasks = 0;
@@ -416,15 +418,13 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     // RELOAD_NEEDED markers — they accumulate from the deploy script and
     // confuse the stale-build gate when the user has actually reloaded.
     try {
-      const fs = require("fs") as typeof import("fs");
-      fs.appendFileSync(
+      appendFileSync(
         "C:/tmp/dante-bypass.log",
         `[${new Date().toISOString()}] resolveWebviewView CALLED\n`,
       );
-      const path = require("path") as typeof import("path");
-      const marker = path.join(this.extensionUri.fsPath, "dist", "RELOAD_NEEDED");
-      if (fs.existsSync(marker)) {
-        fs.unlinkSync(marker);
+      const marker = pathJoin(this.extensionUri.fsPath, "dist", "RELOAD_NEEDED");
+      if (existsSync(marker)) {
+        unlinkSync(marker);
       }
     } catch { /* best-effort diagnostics */ }
 
@@ -444,8 +444,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     } catch (htmlErr) {
       const msg = htmlErr instanceof Error ? htmlErr.message : String(htmlErr);
       try {
-        const fs = require("fs") as typeof import("fs");
-        fs.appendFileSync(
+        appendFileSync(
           "C:/tmp/dante-bypass.log",
           `  getHtmlForWebview THREW: ${msg}\n${htmlErr instanceof Error ? htmlErr.stack ?? "" : ""}\n`,
         );
@@ -699,7 +698,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // of bypassing the model. Hits the orchestrator BEFORE the execute()
         // shell-out fallback so we get real autonomous improvement, not theater.
         if (parsed.command.name === "ascend") {
-          this.outputChannel?.appendLine(`[DanteCode] /ascend → autonomous loop`);
+          this.hostCallbacks.onOutputLine?.(`[DanteCode] /ascend → autonomous loop`);
           this.messages.push({ role: "user", content: text });
           await this.runAscendLoop(parsed.args);
           return;
@@ -2662,7 +2661,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         postMessage: (msg) => this.postMessage(msg as Parameters<typeof this.postMessage>[0]),
         runChatRequest: (text) => this.handleChatRequest(text),
         recordMessage: (m) => this.messages.push(m),
-        log: (line) => this.outputChannel?.appendLine(line),
+        log: (line) => this.hostCallbacks.onOutputLine?.(line),
         getCurrentModel: () => this.currentModel,
         isStopRequested: () => this.stopRequested || !this.ascendActive,
         resetStopRequested: () => { this.stopRequested = false; },

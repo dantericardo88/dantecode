@@ -64,7 +64,7 @@ function getMocks() {
     removeBP: vscode.debug.removeBreakpoints as ReturnType<typeof vi.fn>,
     startDbg: vscode.debug.startDebugging as ReturnType<typeof vi.fn>,
     stopDbg: vscode.debug.stopDebugging as ReturnType<typeof vi.fn>,
-    customReq: (vscode.debug.activeDebugSession as { customRequest: ReturnType<typeof vi.fn> }).customRequest,
+    customReq: (vscode.debug.activeDebugSession as unknown as { customRequest: ReturnType<typeof vi.fn> }).customRequest,
   };
 }
 

@@ -1,0 +1,608 @@
+{
+  "version": 2,
+  "frozenAt": "2026-04-29",
+  "matrix": "dantecode-product-50",
+  "scoringRule": "A 9 requires best-in-class, user-visible, main-path behavior with end-to-end or benchmark proof. Wired code, seeded fixtures, or narrative claims do not earn 9s.",
+  "dimensions": {
+    "1": {
+      "id": "ghost_text_inline_completions",
+      "name": "Ghost text / inline completions",
+      "category": "editor",
+      "scoreCriteria": {
+        "9": ["Cursor/Copilot-feel FIM: low latency, high acceptance, stale-suggestion suppression, multi-line quality, and measured usage in real repos."],
+        "7": ["Main-path FIM is usable, tested, configurable, and has basic latency/quality telemetry, but trails frontier acceptance and polish."],
+        "5": ["Autocomplete exists but is inconsistent, weakly measured, or limited to happy-path fixtures."],
+        "3": ["Prototype-only completion path with little user-visible reliability."],
+        "1": ["No meaningful inline completion support."]
+      }
+    },
+    "2": {
+      "id": "lsp_diagnostics_injection",
+      "name": "LSP / diagnostics injection",
+      "category": "context",
+      "scoreCriteria": {
+        "9": ["Diagnostics, hover, symbols, definitions, and problem context are injected into live repair workflows with IDE smoke proof."],
+        "7": ["Diagnostics and problem-panel context are wired and tested, but semantic depth or workflow coverage is incomplete."],
+        "5": ["Some editor diagnostics are visible but not reliably used by the agent."],
+        "3": ["Diagnostics are present only as disconnected UI or tests."],
+        "1": ["No LSP or diagnostic integration."]
+      }
+    },
+    "3": {
+      "id": "semantic_codebase_search",
+      "name": "Semantic codebase search",
+      "category": "context",
+      "scoreCriteria": {
+        "9": ["Hybrid semantic search is fast, cited, large-repo capable, and proven to improve task completion."],
+        "7": ["Hybrid search is implemented and tested with relevance signals, but outcome lift or scale proof is thin."],
+        "5": ["Search exists but is mostly lexical or unmeasured."],
+        "3": ["Basic file search only."],
+        "1": ["No useful codebase search."]
+      }
+    },
+    "4": {
+      "id": "repo_level_context",
+      "name": "Repo-level context",
+      "category": "context",
+      "scoreCriteria": {
+        "9": ["Symbol graph, import graph, runtime traces, persistent cache, and citations reliably guide real code changes."],
+        "7": ["Repo map and dependency hints are integrated but lack runtime or large-scale proof."],
+        "5": ["Context is assembled from files with limited graph awareness."],
+        "3": ["Manual context only."],
+        "1": ["No repo-level context capability."]
+      }
+    },
+    "5": {
+      "id": "swe_bench_correctness",
+      "name": "SWE-bench / correctness",
+      "category": "evaluation",
+      "scoreCriteria": {
+        "9": ["Reproducible benchmark score is published with traces, pass/fail logs, and DanteForge on/off comparison."],
+        "7": ["Benchmark harness runs meaningful tranches but lacks public breadth or repeated validation."],
+        "5": ["Synthetic or narrow benchmark exists, with limited external comparability."],
+        "3": ["Harness scaffolding exists but no credible result."],
+        "1": ["No correctness benchmark."]
+      }
+    },
+    "6": {
+      "id": "inline_edit_ux",
+      "name": "Inline edit UX",
+      "category": "editor",
+      "scoreCriteria": {
+        "9": ["Streaming edits, partial accept, hunk steering, rollback, and measured acceptance are polished in the editor."],
+        "7": ["Inline edits are user-visible and tested, but partial control or polish trails frontier tools."],
+        "5": ["Edits apply but interaction is coarse or brittle."],
+        "3": ["Edit path is mostly command-line or prototype-only."],
+        "1": ["No inline edit UX."]
+      }
+    },
+    "7": {
+      "id": "multi_file_diff_review",
+      "name": "Multi-file diff + review",
+      "category": "workflow",
+      "scoreCriteria": {
+        "9": ["Multi-file changes are risk-ranked, reviewable, reversible, and correlated with successful outcomes."],
+        "7": ["Diffs and review summaries are reliable, but severity ranking or false-positive handling is incomplete."],
+        "5": ["Multi-file edits work but are hard to review safely."],
+        "3": ["Single-file or unstructured edits dominate."],
+        "1": ["No multi-file diff workflow."]
+      }
+    },
+    "8": {
+      "id": "git_native_workflow",
+      "name": "Git-native workflow",
+      "category": "workflow",
+      "scoreCriteria": {
+        "9": ["Branch, commit, PR, conflict, rollback, issue-to-PR, and review handoff work end-to-end."],
+        "7": ["Core git operations are strong, but PR/conflict automation or hosted handoff is incomplete."],
+        "5": ["Basic diffs and commits exist with gaps."],
+        "3": ["Git is mostly shell-driven by the user."],
+        "1": ["No git-native workflow."]
+      }
+    },
+    "9": {
+      "id": "screenshot_to_code",
+      "name": "Screenshot -> code",
+      "category": "multimodal",
+      "scoreCriteria": {
+        "9": ["Vision-to-code creates responsive UI with visual-diff refinement and realistic acceptance tests."],
+        "7": ["Screenshot-to-code works for constrained UI with preview and tests."],
+        "5": ["Partial image-to-code path exists without robust visual refinement."],
+        "3": ["Prototype or external demo only."],
+        "1": ["No screenshot-to-code support."]
+      }
+    },
+    "10": {
+      "id": "full_app_generation",
+      "name": "Full-app generation",
+      "category": "generation",
+      "scoreCriteria": {
+        "9": ["Generates, runs, inspects, repairs, tests, and deploys realistic apps across stacks."],
+        "7": ["Can generate useful apps with verification, but deployment or multi-stack proof is limited."],
+        "5": ["Scaffolds apps but often leaves manual completion."],
+        "3": ["Toy app generation only."],
+        "1": ["No app generation."]
+      }
+    },
+    "11": {
+      "id": "chat_ux_polish",
+      "name": "Chat UX polish",
+      "category": "ux",
+      "scoreCriteria": {
+        "9": ["Transcript, context controls, proof surfacing, commands, images, loading/error states, and recovery feel premium."],
+        "7": ["Chat is usable and mostly complete, but lacks best-in-class polish or proof surfacing."],
+        "5": ["Chat works but has rough states or hidden mechanics."],
+        "3": ["Basic text box only."],
+        "1": ["No chat UX."]
+      }
+    },
+    "12": {
+      "id": "mention_context_injection",
+      "name": "@mention / context injection",
+      "category": "context",
+      "scoreCriteria": {
+        "9": ["Files, symbols, docs, URLs, git refs, terminal, problems, debugger, and tools inject gracefully with citations."],
+        "7": ["Several context providers are reliable, but breadth or citations are incomplete."],
+        "5": ["Manual file/context attachment only."],
+        "3": ["Minimal context shortcuts."],
+        "1": ["No mention/context injection."]
+      }
+    },
+    "13": {
+      "id": "approval_workflow",
+      "name": "Approval workflow",
+      "category": "safety",
+      "scoreCriteria": {
+        "9": ["Per-tool, per-command, per-hunk approval with rollback, policy gates, and clear risk explanations."],
+        "7": ["Approvals are present and useful, but granularity or policy integration is incomplete."],
+        "5": ["Coarse allow/deny flow."],
+        "3": ["Ad hoc prompts only."],
+        "1": ["No approval workflow."]
+      }
+    },
+    "14": {
+      "id": "browser_live_preview",
+      "name": "Browser live preview",
+      "category": "runtime",
+      "scoreCriteria": {
+        "9": ["Managed preview runs, hot reloads, exposes DOM/screenshots/logs, and drives automated repair."],
+        "7": ["Preview works for common apps but repair loop or isolation is incomplete."],
+        "5": ["Can launch or view a preview manually."],
+        "3": ["Preview path is experimental."],
+        "1": ["No live preview."]
+      }
+    },
+    "15": {
+      "id": "agent_autonomous_mode",
+      "name": "Agent / autonomous mode",
+      "category": "autonomy",
+      "scoreCriteria": {
+        "9": ["Autonomous tasks plan, execute, verify, recover, stop correctly, and produce reviewable proof."],
+        "7": ["Autonomy handles bounded tasks but needs stronger replanning, sandboxing, or proof."],
+        "5": ["Agent loop works for simple tasks with frequent user steering."],
+        "3": ["Scripted or fragile autonomy only."],
+        "1": ["No autonomous agent mode."]
+      }
+    },
+    "16": {
+      "id": "plan_act_control",
+      "name": "Plan/Act control",
+      "category": "autonomy",
+      "scoreCriteria": {
+        "9": ["Editable plan, dependencies, per-step execution, rollback, progress, and proof are visible."],
+        "7": ["Plan/act flow exists but editing or proof is incomplete."],
+        "5": ["Plans are generated but weakly connected to execution."],
+        "3": ["Narrative plans only."],
+        "1": ["No plan/act control."]
+      }
+    },
+    "17": {
+      "id": "browser_computer_use",
+      "name": "Browser / computer use",
+      "category": "runtime",
+      "scoreCriteria": {
+        "9": ["Browser/computer observation and action loops robustly research docs, test UIs, and repair failures."],
+        "7": ["Browser use works for bounded flows but is not deeply integrated."],
+        "5": ["Can call browser tools manually with limited repair use."],
+        "3": ["Experimental browser hooks."],
+        "1": ["No browser/computer use."]
+      }
+    },
+    "18": {
+      "id": "pr_review_in_ide",
+      "name": "PR review surfaced in IDE",
+      "category": "review",
+      "scoreCriteria": {
+        "9": ["High-signal PR review comments are severity-ranked, fixable, visible in IDE/PR, and validated by outcomes."],
+        "7": ["PR review works but lacks strong false-positive suppression or IDE polish."],
+        "5": ["Review summaries exist but are not dependable."],
+        "3": ["Prototype review command only."],
+        "1": ["No PR review."]
+      }
+    },
+    "19": {
+      "id": "test_runner_integration",
+      "name": "Test runner integration",
+      "category": "quality",
+      "scoreCriteria": {
+        "9": ["Watch failures, inline diagnostics, repair prompts, and passing proof are connected across CLI and IDE."],
+        "7": ["Tests run and feed repair loops, but watch/IDE integration is incomplete."],
+        "5": ["Tests are callable but not integrated into the agent loop."],
+        "3": ["Manual test command only."],
+        "1": ["No test runner integration."]
+      }
+    },
+    "20": {
+      "id": "debug_runtime_context",
+      "name": "Debug / runtime context",
+      "category": "runtime",
+      "scoreCriteria": {
+        "9": ["Stack frames, watches, locals, logs, failing requests, and traces drive repairs."],
+        "7": ["Debug context exists but is partial or not broadly wired."],
+        "5": ["Basic error output parsing only."],
+        "3": ["Manual debugging only."],
+        "1": ["No runtime debug context."]
+      }
+    },
+    "21": {
+      "id": "session_memory",
+      "name": "Session memory",
+      "category": "learning",
+      "scoreCriteria": {
+        "9": ["Memory is cited, fresh, editable, outcome-proven, and improves later task success."],
+        "7": ["Memory is useful but causal outcome proof or governance is incomplete."],
+        "5": ["Persistence exists without strong relevance control."],
+        "3": ["Ad hoc saved notes only."],
+        "1": ["No session memory."]
+      }
+    },
+    "22": {
+      "id": "skill_plugin_system",
+      "name": "Skill / plugin system",
+      "category": "ecosystem",
+      "scoreCriteria": {
+        "9": ["Skills/plugins are discoverable, versioned, policy-gated, testable, portable, and publishable."],
+        "7": ["Skill/plugin architecture is real but ecosystem DX or governance is incomplete."],
+        "5": ["Plugins exist but are hard to build or trust."],
+        "3": ["Internal extension points only."],
+        "1": ["No skill/plugin system."]
+      }
+    },
+    "23": {
+      "id": "security_sandboxing",
+      "name": "Security / sandboxing",
+      "category": "safety",
+      "scoreCriteria": {
+        "9": ["Main-path sandboxing, secret scanning, policy enforcement, audit logs, and prompt-injection controls are proven."],
+        "7": ["Strong safety components exist but enforcement is incomplete in some paths."],
+        "5": ["Security checks exist but can be bypassed or are advisory."],
+        "3": ["Basic warnings only."],
+        "1": ["No meaningful security controls."]
+      }
+    },
+    "24": {
+      "id": "reliability_rollback",
+      "name": "Reliability / rollback",
+      "category": "reliability",
+      "scoreCriteria": {
+        "9": ["Checkpoint restore, safe resume, circuit breakers, loop detection, and failure-mode tests are universal."],
+        "7": ["Rollback/recovery exists but does not cover all main workflows."],
+        "5": ["Manual git rollback or partial checkpoints."],
+        "3": ["Fragile recovery only."],
+        "1": ["No rollback/reliability strategy."]
+      }
+    },
+    "25": {
+      "id": "mcp_tool_ecosystem",
+      "name": "MCP / tool ecosystem",
+      "category": "ecosystem",
+      "scoreCriteria": {
+        "9": ["MCP/tool discovery, schema validation, approvals, logs, docs, and third-party server proof are mature."],
+        "7": ["MCP support is real but ecosystem polish or observability is incomplete."],
+        "5": ["Tool bridge exists with limited validation."],
+        "3": ["Hardcoded tools only."],
+        "1": ["No MCP/tool ecosystem."]
+      }
+    },
+    "26": {
+      "id": "local_model_routing",
+      "name": "Local model routing",
+      "category": "models",
+      "scoreCriteria": {
+        "9": ["Routing adapts by task, quality, privacy, cost, offline state, and provider health with failure tests."],
+        "7": ["Multi-provider routing is useful but adaptation or proof is incomplete."],
+        "5": ["Multiple providers exist but manual selection dominates."],
+        "3": ["One or two hardcoded providers."],
+        "1": ["No model routing."]
+      }
+    },
+    "27": {
+      "id": "cost_optimization",
+      "name": "Cost optimization",
+      "category": "models",
+      "scoreCriteria": {
+        "9": ["Cost per successful task, budgets, caching, fallback savings, and spend UX are proven."],
+        "7": ["Cost controls exist but are not outcome-aware."],
+        "5": ["Token/cost display exists with limited actionability."],
+        "3": ["Manual cost awareness only."],
+        "1": ["No cost optimization."]
+      }
+    },
+    "28": {
+      "id": "enterprise_readiness",
+      "name": "Enterprise",
+      "category": "enterprise",
+      "scoreCriteria": {
+        "9": ["SSO, RBAC, org model, audit export, admin policy, retention, privacy, and support docs are production-ready."],
+        "7": ["Enterprise foundations exist but lack real IdP/org/admin workflows."],
+        "5": ["Some enterprise-shaped config or audit features exist."],
+        "3": ["Mostly single-user with limited admin controls."],
+        "1": ["No enterprise readiness."]
+      }
+    },
+    "29": {
+      "id": "eval_infrastructure_quality",
+      "name": "Eval infrastructure quality",
+      "category": "evaluation",
+      "scoreCriteria": {
+        "9": ["Reproducible evals, traces, dashboards, regression gates, and score deltas guide development."],
+        "7": ["Eval harnesses exist but breadth or automation is incomplete."],
+        "5": ["Some fixtures or local evals exist."],
+        "3": ["Manual assessment only."],
+        "1": ["No eval infrastructure."]
+      }
+    },
+    "30": {
+      "id": "ux_trust_explainability",
+      "name": "UX trust / explainability",
+      "category": "ux",
+      "scoreCriteria": {
+        "9": ["Users can inspect why the agent acted, evidence used, risks, remaining uncertainty, and undo paths."],
+        "7": ["Proof and rationale are visible but not consistently steerable."],
+        "5": ["Some summaries exist without strong trust mechanics."],
+        "3": ["Opaque agent behavior."],
+        "1": ["No trust/explainability UX."]
+      }
+    },
+    "31": {
+      "id": "context_governance",
+      "name": "Context governance",
+      "category": "context",
+      "scoreCriteria": {
+        "9": ["Context is cited, scoped, expired, deduped, inspectable, user-controllable, and usefulness-measured."],
+        "7": ["Context controls exist but governance or measurement is incomplete."],
+        "5": ["Context is gathered with weak provenance."],
+        "3": ["Prompt stuffing or manual context only."],
+        "1": ["No context governance."]
+      }
+    },
+    "32": {
+      "id": "human_agent_collaboration",
+      "name": "Human-agent collaboration",
+      "category": "collaboration",
+      "scoreCriteria": {
+        "9": ["Users can interrupt, steer, share edit state, hand off tasks, pause/resume, and inspect subagents smoothly."],
+        "7": ["Collaboration is usable but lacks mid-run steering or handoff polish."],
+        "5": ["Human approval exists but collaboration is coarse."],
+        "3": ["Turn-by-turn prompting only."],
+        "1": ["No collaboration model."]
+      }
+    },
+    "33": {
+      "id": "task_decomposition_quality",
+      "name": "Task decomposition quality",
+      "category": "planning",
+      "scoreCriteria": {
+        "9": ["Vague tasks become dependency-aware, safe, sequenced, verifiable subtasks with completion proof."],
+        "7": ["Decomposition is useful but weakly measured or incomplete for complex tasks."],
+        "5": ["Plans are broken into broad steps only."],
+        "3": ["Ad hoc decomposition."],
+        "1": ["No task decomposition."]
+      }
+    },
+    "34": {
+      "id": "regression_prevention",
+      "name": "Regression prevention",
+      "category": "quality",
+      "scoreCriteria": {
+        "9": ["Release gates stay green, regressions are blocked, and score claims are impossible with failing gates."],
+        "7": ["Regression gates exist but do not yet block every risky claim or path."],
+        "5": ["Tests exist but gate discipline is inconsistent."],
+        "3": ["Manual regression checking only."],
+        "1": ["No regression prevention."]
+      }
+    },
+    "35": {
+      "id": "onboarding_time_to_value",
+      "name": "Onboarding / time-to-value",
+      "category": "adoption",
+      "scoreCriteria": {
+        "9": ["Fresh users complete a real first task in under 10 minutes with guided recovery and clear setup."],
+        "7": ["Onboarding works but needs polish, telemetry, or beta proof."],
+        "5": ["Setup is documented but easy to derail."],
+        "3": ["Expert-only setup."],
+        "1": ["No onboarding path."]
+      }
+    },
+    "36": {
+      "id": "ecosystem_portability",
+      "name": "Ecosystem portability",
+      "category": "ecosystem",
+      "scoreCriteria": {
+        "9": ["CLI, IDE, CI, local/cloud models, MCP, and hosted workflows share a coherent portable runtime."],
+        "7": ["Portability is real but surface parity or packaging is incomplete."],
+        "5": ["Some surfaces work independently."],
+        "3": ["Single-surface implementation."],
+        "1": ["No portability."]
+      }
+    },
+    "37": {
+      "id": "model_quality_adaptation",
+      "name": "Model quality adaptation",
+      "category": "models",
+      "scoreCriteria": {
+        "9": ["Model, prompt, budget, and retry policy adapt by task, failure, cost, and outcome history."],
+        "7": ["Adaptive routing exists but lacks outcome-driven learning."],
+        "5": ["Static routing with some heuristics."],
+        "3": ["Manual model selection."],
+        "1": ["No model adaptation."]
+      }
+    },
+    "38": {
+      "id": "latency_responsiveness",
+      "name": "Latency / responsiveness",
+      "category": "performance",
+      "scoreCriteria": {
+        "9": ["p50/p95 SLOs are met across chat, tools, FIM, indexing, previews, and apply paths."],
+        "7": ["Important paths are measured and mostly responsive."],
+        "5": ["Some latency data exists but UX can block or feel slow."],
+        "3": ["Latency is unmeasured and inconsistent."],
+        "1": ["Unusable responsiveness."]
+      }
+    },
+    "39": {
+      "id": "observability_telemetry",
+      "name": "Observability / telemetry",
+      "category": "operations",
+      "scoreCriteria": {
+        "9": ["Cost, latency, models, tool calls, failures, evals, and score movement are traceable in dashboards."],
+        "7": ["Logs and artifacts are strong but dashboards or correlation are incomplete."],
+        "5": ["Logs exist but are fragmented."],
+        "3": ["Debugging requires manual spelunking."],
+        "1": ["No observability."]
+      }
+    },
+    "40": {
+      "id": "configuration_ergonomics",
+      "name": "Configuration ergonomics",
+      "category": "dx",
+      "scoreCriteria": {
+        "9": ["Provider, model, policy, tool, memory, and workspace setup is guided, validated, recoverable, and documented."],
+        "7": ["Configuration is powerful but still has friction or weak validation."],
+        "5": ["Configuration works for experts."],
+        "3": ["Config is brittle or scattered."],
+        "1": ["No coherent configuration."]
+      }
+    },
+    "41": {
+      "id": "offline_degraded_mode",
+      "name": "Offline / degraded-mode behavior",
+      "category": "reliability",
+      "scoreCriteria": {
+        "9": ["Useful behavior survives provider, network, index, credential, and tool failures with clear fallback UX."],
+        "7": ["Offline/local fallback exists but some degraded paths are rough."],
+        "5": ["Limited local fallback."],
+        "3": ["Mostly online-only."],
+        "1": ["Fails hard without cloud access."]
+      }
+    },
+    "42": {
+      "id": "data_privacy_controls",
+      "name": "Data/privacy controls",
+      "category": "safety",
+      "scoreCriteria": {
+        "9": ["Redaction, retention, telemetry opt-out, local-only mode, and admin-enforced privacy policy are proven."],
+        "7": ["Good privacy primitives exist but lack full admin/product integration."],
+        "5": ["Basic local-first behavior or warnings."],
+        "3": ["Privacy mostly relies on provider behavior."],
+        "1": ["No meaningful privacy controls."]
+      }
+    },
+    "43": {
+      "id": "documentation_quality",
+      "name": "Documentation quality",
+      "category": "adoption",
+      "scoreCriteria": {
+        "9": ["Docs include quickstart, recipes, troubleshooting, API, architecture, migration, and release guidance."],
+        "7": ["Docs are useful but incomplete for public beta users."],
+        "5": ["Internal docs are stronger than public docs."],
+        "3": ["Sparse or stale docs."],
+        "1": ["No useful docs."]
+      }
+    },
+    "44": {
+      "id": "extensibility_developer_experience",
+      "name": "Extensibility developer experience",
+      "category": "ecosystem",
+      "scoreCriteria": {
+        "9": ["Extension authors get templates, tests, manifests, local dev tools, validation, docs, and publish flow."],
+        "7": ["Extensibility is real but contributor ergonomics need polish."],
+        "5": ["Extension points exist but are underdocumented."],
+        "3": ["Internal-only extensibility."],
+        "1": ["No extensibility DX."]
+      }
+    },
+    "45": {
+      "id": "benchmark_transparency",
+      "name": "Benchmark transparency",
+      "category": "evaluation",
+      "scoreCriteria": {
+        "9": ["Benchmark claims include commands, seeds, traces, raw logs, score history, and limitations."],
+        "7": ["Benchmark results are reproducible internally but not fully public or comparable."],
+        "5": ["Some benchmark-like evidence exists."],
+        "3": ["Claims rely mostly on anecdote."],
+        "1": ["No benchmark transparency."]
+      }
+    },
+    "46": {
+      "id": "multi_repo_monorepo_scale",
+      "name": "Multi-repo / monorepo scale",
+      "category": "scale",
+      "scoreCriteria": {
+        "9": ["Huge repos, workspace graphs, dependency boundaries, and cross-repo changes are measured and reliable."],
+        "7": ["Monorepo support exists but lacks large-scale proof."],
+        "5": ["Works on moderate repos."],
+        "3": ["Small-repo assumptions dominate."],
+        "1": ["No scale story."]
+      }
+    },
+    "47": {
+      "id": "language_framework_breadth",
+      "name": "Language/framework breadth",
+      "category": "scale",
+      "scoreCriteria": {
+        "9": ["Repair/generation is proven across major languages and frameworks with language-aware tooling."],
+        "7": ["Several languages work but proof is uneven."],
+        "5": ["One stack is strong; others are incidental."],
+        "3": ["Narrow language support."],
+        "1": ["No meaningful breadth."]
+      }
+    },
+    "48": {
+      "id": "accessibility_inclusive_ux",
+      "name": "Accessibility / inclusive UX",
+      "category": "ux",
+      "scoreCriteria": {
+        "9": ["Keyboard, screen reader, contrast, focus, motion, readable review UX, and accessibility CI are proven."],
+        "7": ["Major accessibility requirements are handled but not fully measured."],
+        "5": ["Basic accessibility hygiene only."],
+        "3": ["Accessibility is mostly untested."],
+        "1": ["Known inaccessible UX or no consideration."]
+      }
+    },
+    "49": {
+      "id": "deployment_environment_intelligence",
+      "name": "Deployment / environment intelligence",
+      "category": "runtime",
+      "scoreCriteria": {
+        "9": ["Env vars, Docker, CI, deploy logs, cloud config, services, and runtime failures are understood and repaired."],
+        "7": ["Environment awareness exists but deploy/runtime intelligence is incomplete."],
+        "5": ["Basic dev-server and env handling."],
+        "3": ["Manual environment setup."],
+        "1": ["No environment intelligence."]
+      }
+    },
+    "50": {
+      "id": "learning_loop_self_improvement",
+      "name": "Learning loop / self-improvement",
+      "category": "learning",
+      "scoreCriteria": {
+        "9": ["Failures and successes safely become evals, lessons, routing policies, prompts, and regression gates."],
+        "7": ["Learning loop exists but lacks full causal proof or governance."],
+        "5": ["Lessons are recorded but weakly operationalized."],
+        "3": ["Manual retros only."],
+        "1": ["No learning loop."]
+      }
+    }
+  }
+}

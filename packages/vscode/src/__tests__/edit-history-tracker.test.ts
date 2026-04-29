@@ -7,22 +7,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── vscode mock ───────────────────────────────────────────────────────────────
 
-let changeListener: ((event: unknown) => void) | null = null;
-
 vi.mock("vscode", () => {
   return {
     workspace: {
-      onDidChangeTextDocument: vi.fn((listener: (event: unknown) => void) => {
-        changeListener = listener;
+      onDidChangeTextDocument: vi.fn((_listener: (event: unknown) => void) => {
         return { dispose: vi.fn() };
       }),
     },
   };
 });
-
-// Suppress noUnusedLocals on changeListener — it's only assigned by the mock
-// and reset in beforeEach; never read directly. Kept for future fire() tests.
-void changeListener;
 
 import { EditHistoryTracker } from "../edit-history-tracker.js";
 import type { EditRecord } from "../edit-history-tracker.js";
@@ -50,7 +43,6 @@ function makeTracker(maxSize = 50): EditHistoryTracker {
 describe("EditHistoryTracker", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    changeListener = null;
   });
 
   // ── Ring buffer ───────────────────────────────────────────────────────────

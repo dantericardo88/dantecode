@@ -1,8 +1,8 @@
 # Session Brief — 2026-04-29
 
 **Project:** dantecode
-**Score:** 7.3/10 (needs-work) — target: 9.0
-**Top gaps:** communityAdoption (1.5), maintainability (3.6), contextEconomy (5.0)
+**Score:** 7.1/10 (needs-work) — target: 9.0
+**Top gaps:** communityAdoption (1.5), contextEconomy (5.0), maintainability (5.7)
 
 ## Architecture
 ESM-only TypeScript. Commander.js CLI. tsup → dist/index.js.

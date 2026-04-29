@@ -148,6 +148,7 @@ describe("Budget % warning — Sprint H (dim 27)", () => {
     warned = simulateBudgetWarning(0.009, 0.01, warned, outputs);
     warned = simulateBudgetWarning(0.0095, 0.01, warned, outputs);
     warned = simulateBudgetWarning(0.01, 0.01, warned, outputs);
+    expect(warned).toBe(true);
     expect(outputs.length).toBe(1);
   });
 

@@ -1,0 +1,134 @@
+{
+  "run_id": "7589d0ea-2819-489f-8b6c-36c9a3187058",
+  "timestamp": "2026-04-29T18:15:25.234Z",
+  "total": 25,
+  "resolved": 25,
+  "pass_rate": 1,
+  "results": [
+    {
+      "instance_id": "ts-utils__001",
+      "resolved": true,
+      "durationMs": 1
+    },
+    {
+      "instance_id": "ts-utils__002",
+      "resolved": true,
+      "durationMs": 2
+    },
+    {
+      "instance_id": "ts-utils__003",
+      "resolved": true,
+      "durationMs": 1
+    },
+    {
+      "instance_id": "ts-utils__004",
+      "resolved": true,
+      "durationMs": 2
+    },
+    {
+      "instance_id": "ts-utils__005",
+      "resolved": true,
+      "durationMs": 1
+    },
+    {
+      "instance_id": "ts-utils__006",
+      "resolved": true,
+      "durationMs": 1
+    },
+    {
+      "instance_id": "ts-utils__007",
+      "resolved": true,
+      "durationMs": 2
+    },
+    {
+      "instance_id": "ts-utils__008",
+      "resolved": true,
+      "durationMs": 1
+    },
+    {
+      "instance_id": "ts-utils__009",
+      "resolved": true,
+      "durationMs": 1
+    },
+    {
+      "instance_id": "ts-utils__010",
+      "resolved": true,
+      "durationMs": 2
+    },
+    {
+      "instance_id": "ts-utils__011",
+      "resolved": true,
+      "durationMs": 1
+    },
+    {
+      "instance_id": "ts-utils__012",
+      "resolved": true,
+      "durationMs": 1
+    },
+    {
+      "instance_id": "ts-utils__013",
+      "resolved": true,
+      "durationMs": 2
+    },
+    {
+      "instance_id": "ts-utils__014",
+      "resolved": true,
+      "durationMs": 1
+    },
+    {
+      "instance_id": "ts-utils__015",
+      "resolved": true,
+      "durationMs": 1
+    },
+    {
+      "instance_id": "ts-utils__016",
+      "resolved": true,
+      "durationMs": 2
+    },
+    {
+      "instance_id": "ts-utils__017",
+      "resolved": true,
+      "durationMs": 1
+    },
+    {
+      "instance_id": "ts-utils__018",
+      "resolved": true,
+      "durationMs": 1
+    },
+    {
+      "instance_id": "ts-utils__019",
+      "resolved": true,
+      "durationMs": 2
+    },
+    {
+      "instance_id": "ts-utils__020",
+      "resolved": true,
+      "durationMs": 1
+    },
+    {
+      "instance_id": "ts-utils__021",
+      "resolved": true,
+      "durationMs": 2
+    },
+    {
+      "instance_id": "ts-utils__022",
+      "resolved": true,
+      "durationMs": 1
+    },
+    {
+      "instance_id": "ts-utils__023",
+      "resolved": true,
+      "durationMs": 1
+    },
+    {
+      "instance_id": "ts-utils__024",
+      "resolved": true,
+      "durationMs": 1
+    },
+    {
+      "instance_id": "ts-utils__025",
+      "resolved": true,
+      "durationMs": 2
+    }
+  ]
+}

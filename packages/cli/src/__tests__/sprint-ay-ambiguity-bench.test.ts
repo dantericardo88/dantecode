@@ -13,7 +13,7 @@
 // ============================================================================
 
 import { describe, it, expect } from "vitest";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -177,7 +177,6 @@ describe("verifyPatchApplicability — Sprint AY (dim 5)", () => {
 
   // 12. getReproducedTranche reads from a seeded bench-results.json in tmpdir
   it("getReproducedTranche reads reproduced_tranche from a seeded file", () => {
-    const { writeFileSync } = require("node:fs") as typeof import("node:fs");
     const dir = makeDir();
     const benchPath = join(dir, "bench-results.json");
     const data = {

@@ -298,6 +298,73 @@ export type {
   FabricationSnapshot,
 } from "./fabrication-tracker.js";
 export { detectUnverifiedScoreClaims } from "./score-claim-validator.js";
+export {
+  appendBenchmarkScoreHistory,
+  createBenchmarkArtifactRef,
+  evaluateBenchmarkTransparencyClaimGate,
+  formatBenchmarkTransparencyMarkdown,
+  formatBenchmarkTransparencyText,
+  runBenchmarkTransparencyGate,
+  sha256File,
+  sha256Text,
+  validateBenchmarkTransparencyManifest,
+} from "./benchmark-transparency.js";
+export {
+  classifySWEFailure,
+  evaluateSWEBenchCorrectnessGate,
+  formatSWEBenchCorrectnessMarkdown,
+  formatSWEBenchCorrectnessText,
+} from "./swe-bench-correctness-gate.js";
+export type {
+  BenchmarkArtifactKind,
+  BenchmarkArtifactRef,
+  BenchmarkScoreHistoryEntry,
+  BenchmarkTransparencyClaimGateInput,
+  BenchmarkTransparencyClaimGateResult,
+  BenchmarkTransparencyGateResult,
+  BenchmarkTransparencyManifest,
+  BenchmarkTransparencyProof,
+  BenchmarkTransparencySuite,
+  RunBenchmarkTransparencyGateOptions,
+} from "./benchmark-transparency.js";
+export type {
+  SWEBenchAgentRunProof,
+  SWEBenchArtifactCompletenessProof,
+  SWEBenchCalibrationProof,
+  SWEBenchComparisonProof,
+  SWEBenchCorrectnessGateInput,
+  SWEBenchCorrectnessGateResult,
+  SWEBenchCorrectnessProof,
+  SWEBenchDatasetProof,
+  SWEBenchFailureLike,
+  SWEBenchRepeatedRunProof,
+  SWEBenchSuite,
+  SWEFailureClass,
+} from "./swe-bench-correctness-gate.js";
+export {
+  createRegressionFailureSignature,
+  evaluateScoreClaimGate,
+  formatRegressionGateMarkdown,
+  formatRegressionGateText,
+  getRegressionGateSteps,
+  loadRegressionWaivers,
+  normalizeRegressionProfile,
+  runRegressionGate,
+  validateRegressionWaivers,
+} from "./regression-gate.js";
+export type {
+  RegressionFailure,
+  RegressionFailureClass,
+  RegressionGateCommand,
+  RegressionGateProfile,
+  RegressionGateProof,
+  RegressionGateResult,
+  RegressionGateStep,
+  RegressionWaiver,
+  RegressionWaiverError,
+  ScoreClaimGateInput,
+  ScoreClaimGateResult,
+} from "./regression-gate.js";
 
 // ——— Execution Heuristics —————————————————————————————————————————————————————————
 
@@ -2226,6 +2293,17 @@ export type {
   RepairPrompt,
   PreviewSessionStats,
 } from "./browser-capture-tracker.js";
+
+export {
+  evaluateBrowserLivePreviewGate,
+  generateBrowserLivePreviewReport,
+} from "./browser-live-preview-gate.js";
+export type {
+  BrowserLivePreviewProof,
+  BrowserLivePreviewGateOptions,
+  BrowserLivePreviewCoverage,
+  BrowserLivePreviewGateResult,
+} from "./browser-live-preview-gate.js";
 
 // Sprint Dim 48 — Accessibility / Inclusive UX
 export {
