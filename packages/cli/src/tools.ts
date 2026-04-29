@@ -1712,263 +1712,223 @@ async function toolGitHubOps(
   return { toolName: "GitHubOps", ...inner, ok: !inner.isError };
 }
 
-async function _toolGitHubOpsInner(
-  input: Record<string, unknown>,
-  projectRoot: string,
-): Promise<{ content: string; isError: boolean }> {
-  const action = (input["action"] as string) || "search_repos";
+type GhOpResult = { content: string; isError: boolean };
+type GhOpInput = Record<string, unknown>;
 
-  if (!VALID_ACTIONS.has(action)) {
+function ghOpCreatePr(input: GhOpInput, projectRoot: string): GhOpResult {
+  const title = input["title"] as string;
+  if (!title) return { content: "Error: title is required for create_pr", isError: true };
+  const body = input["body"] as string | undefined;
+  const base = input["base"] as string | undefined;
+  const draft = input["draft"] as boolean | undefined;
+  const args = [`gh pr create --title ${JSON.stringify(title)}`];
+  if (body) args.push(`--body ${JSON.stringify(body)}`);
+  if (base) args.push(`--base ${JSON.stringify(base)}`);
+  if (draft) args.push("--draft");
+  return { content: `PR created:\n${execGh(args.join(" "), projectRoot).trim()}`, isError: false };
+}
+
+function ghOpViewPr(input: GhOpInput, projectRoot: string): GhOpResult {
+  const number = input["number"] as number | undefined;
+  if (!number) return { content: "Error: number is required for view_pr", isError: true };
+  const out = execGh(
+    `gh pr view ${number} --json title,state,url,body,author,reviewDecision,mergeable,additions,deletions,changedFiles`,
+    projectRoot,
+  );
+  const pr = JSON.parse(out);
+  const lines = [
+    `**#${number}: ${pr.title}** [${pr.state}]`,
+    `Author: ${pr.author?.login ?? "unknown"} | Review: ${pr.reviewDecision ?? "NONE"}`,
+    `Mergeable: ${pr.mergeable ?? "unknown"} | +${pr.additions ?? 0} -${pr.deletions ?? 0} (${pr.changedFiles ?? 0} files)`,
+    `URL: ${pr.url}`,
+  ];
+  if (pr.body) lines.push("", pr.body.slice(0, 1000));
+  return { content: lines.join("\n"), isError: false };
+}
+
+function ghOpReviewPr(input: GhOpInput, projectRoot: string): GhOpResult {
+  const number = input["number"] as number | undefined;
+  if (!number) return { content: "Error: number is required for review_pr", isError: true };
+  const reviewAction = input["review_action"] as string | undefined;
+  const body = input["body"] as string | undefined;
+  const validReviewActions = ["approve", "request-changes", "comment"];
+  const ra = reviewAction || "comment";
+  if (!validReviewActions.includes(ra)) {
+    return { content: `Error: review_action must be one of: ${validReviewActions.join(", ")}`, isError: true };
+  }
+  const args = [`gh pr review ${number} --${ra}`];
+  if (body) args.push(`--body ${JSON.stringify(body)}`);
+  return { content: `PR #${number} reviewed (${ra}):\n${execGh(args.join(" "), projectRoot).trim()}`, isError: false };
+}
+
+function ghOpMergePr(input: GhOpInput, projectRoot: string): GhOpResult {
+  const number = input["number"] as number | undefined;
+  if (!number) return { content: "Error: number is required for merge_pr", isError: true };
+  const method = input["merge_method"] as string | undefined;
+  const validMethods = ["merge", "squash", "rebase"];
+  const mm = method || "merge";
+  if (!validMethods.includes(mm)) {
+    return { content: `Error: merge_method must be one of: ${validMethods.join(", ")}`, isError: true };
+  }
+  return { content: `PR #${number} merged (${mm}):\n${execGh(`gh pr merge ${number} --${mm}`, projectRoot).trim()}`, isError: false };
+}
+
+function ghOpListPrs(input: GhOpInput, projectRoot: string): GhOpResult {
+  const state = (input["state"] as string) || "open";
+  const limit = typeof input["limit"] === "number" ? Math.min(input["limit"] as number, 50) : 10;
+  const out = execGh(
+    `gh pr list --state ${state} --limit ${limit} --json number,title,state,url,author,createdAt,headRefName`,
+    projectRoot,
+  );
+  const prs = JSON.parse(out) as Array<{
+    number?: number; title?: string; state?: string; url?: string;
+    author?: { login?: string }; createdAt?: string; headRefName?: string;
+  }>;
+  if (prs.length === 0) return { content: `No ${state} PRs found.`, isError: false };
+  const lines = prs.map(
+    (pr, i) =>
+      `${i + 1}. #${pr.number ?? "?"} **${pr.title ?? "untitled"}** [${pr.state ?? "?"}]\n   Branch: ${pr.headRefName ?? "?"} | Author: ${pr.author?.login ?? "?"}\n   ${pr.url ?? ""}`,
+  );
+  return { content: `PRs (${state}, ${prs.length} results):\n\n${lines.join("\n\n")}`, isError: false };
+}
+
+function ghOpCreateIssue(input: GhOpInput, projectRoot: string): GhOpResult {
+  const title = input["title"] as string;
+  if (!title) return { content: "Error: title is required for create_issue", isError: true };
+  const body = input["body"] as string | undefined;
+  const labels = input["labels"] as string[] | string | undefined;
+  const args = [`gh issue create --title ${JSON.stringify(title)}`];
+  if (body) args.push(`--body ${JSON.stringify(body)}`);
+  if (labels) {
+    const labelList = Array.isArray(labels) ? labels.join(",") : labels;
+    args.push(`--label ${JSON.stringify(labelList)}`);
+  }
+  return { content: `Issue created:\n${execGh(args.join(" "), projectRoot).trim()}`, isError: false };
+}
+
+function ghOpCommentIssue(input: GhOpInput, projectRoot: string): GhOpResult {
+  const number = input["number"] as number | undefined;
+  const body = input["body"] as string | undefined;
+  if (!number) return { content: "Error: number is required for comment_issue", isError: true };
+  if (!body) return { content: "Error: body is required for comment_issue", isError: true };
+  return {
+    content: `Comment added to #${number}:\n${execGh(`gh issue comment ${number} --body ${JSON.stringify(body)}`, projectRoot).trim()}`,
+    isError: false,
+  };
+}
+
+function ghOpCloseIssue(input: GhOpInput, projectRoot: string): GhOpResult {
+  const number = input["number"] as number | undefined;
+  if (!number) return { content: "Error: number is required for close_issue", isError: true };
+  const reason = input["reason"] as string | undefined;
+  const args = [`gh issue close ${number}`];
+  if (reason) args.push(`--reason ${JSON.stringify(reason)}`);
+  return { content: `Issue #${number} closed:\n${execGh(args.join(" "), projectRoot).trim()}`, isError: false };
+}
+
+function ghOpListIssues(input: GhOpInput, projectRoot: string): GhOpResult {
+  const state = (input["state"] as string) || "open";
+  const limit = typeof input["limit"] === "number" ? Math.min(input["limit"] as number, 50) : 10;
+  const labels = input["labels"] as string[] | string | undefined;
+  const args = [
+    `gh issue list --state ${state} --limit ${limit} --json number,title,state,url,author,createdAt,labels`,
+  ];
+  if (labels) {
+    const labelList = Array.isArray(labels) ? labels.join(",") : labels;
+    args.push(`--label ${JSON.stringify(labelList)}`);
+  }
+  const out = execGh(args.join(" "), projectRoot);
+  const issues = JSON.parse(out) as Array<{
+    number?: number; title?: string; state?: string; url?: string;
+    author?: { login?: string }; labels?: Array<{ name?: string }>;
+  }>;
+  if (issues.length === 0) return { content: `No ${state} issues found.`, isError: false };
+  const lines = issues.map((iss, i) => {
+    const lbls = iss.labels?.map((l) => l.name).filter(Boolean).join(", ");
+    return `${i + 1}. #${iss.number ?? "?"} **${iss.title ?? "untitled"}** [${iss.state ?? "?"}]${lbls ? `\n   Labels: ${lbls}` : ""}\n   ${iss.url ?? ""}`;
+  });
+  return { content: `Issues (${state}, ${issues.length} results):\n\n${lines.join("\n\n")}`, isError: false };
+}
+
+function ghOpTriggerWorkflow(input: GhOpInput, projectRoot: string): GhOpResult {
+  const workflow = input["workflow"] as string | undefined;
+  if (!workflow) return { content: "Error: workflow is required for trigger_workflow", isError: true };
+  const ref = input["ref"] as string | undefined;
+  const args = [`gh workflow run ${JSON.stringify(workflow)}`];
+  if (ref) args.push(`--ref ${JSON.stringify(ref)}`);
+  const out = execGh(args.join(" "), projectRoot);
+  return { content: `Workflow triggered:\n${out.trim() || "(dispatched successfully)"}`, isError: false };
+}
+
+function ghOpViewRun(input: GhOpInput, projectRoot: string): GhOpResult {
+  const runId = input["run_id"] as string | number | undefined;
+  if (!runId) return { content: "Error: run_id is required for view_run", isError: true };
+  const out = execGh(
+    `gh run view ${runId} --json status,conclusion,name,url,createdAt,updatedAt,headBranch,event`,
+    projectRoot,
+  );
+  const run = JSON.parse(out);
+  return {
+    content: [
+      `**${run.name ?? "Run"}** [${run.status}${run.conclusion ? ` — ${run.conclusion}` : ""}]`,
+      `Branch: ${run.headBranch ?? "?"} | Event: ${run.event ?? "?"}`,
+      `Created: ${run.createdAt ?? "?"} | Updated: ${run.updatedAt ?? "?"}`,
+      `URL: ${run.url ?? "N/A"}`,
+    ].join("\n"),
+    isError: false,
+  };
+}
+
+/**
+ * Map gh-CLI error stderr into a user-friendly message. Common modes:
+ * gh missing on PATH, gh not authenticated, anything else surfaces raw.
+ */
+function formatGhError(err: unknown): GhOpResult {
+  const error = err as { stderr?: string; message?: string };
+  const stderr = typeof error.stderr === "string" ? error.stderr : "";
+  if (stderr.includes("gh: command not found") || stderr.includes("not recognized")) {
     return {
-      content: `Error: action must be one of: ${[...VALID_ACTIONS].join(", ")}`,
+      content: "Error: GitHub CLI (gh) is not installed or not in PATH. Install from https://cli.github.com/",
       isError: true,
     };
   }
+  if (stderr.includes("not logged in") || stderr.includes("auth login")) {
+    return { content: "Error: GitHub CLI is not authenticated. Run `gh auth login` first.", isError: true };
+  }
+  const message = stderr || (err instanceof Error ? err.message : String(err));
+  return { content: `GitHubOps error: ${message}`, isError: true };
+}
 
+async function _toolGitHubOpsInner(
+  input: Record<string, unknown>,
+  projectRoot: string,
+): Promise<GhOpResult> {
+  const action = (input["action"] as string) || "search_repos";
+  if (!VALID_ACTIONS.has(action)) {
+    return { content: `Error: action must be one of: ${[...VALID_ACTIONS].join(", ")}`, isError: true };
+  }
   try {
     switch (action as GitHubOpsAction) {
-      // ---- Search operations (delegate to existing logic) ----
       case "search_repos":
       case "search_code":
       case "search_issues":
-      case "search_prs": {
-        const searchType = action.replace("search_", "");
-        return toolGitHubSearch({ ...input, type: searchType }, projectRoot);
-      }
-
-      // ---- PR operations ----
-      case "create_pr": {
-        const title = input["title"] as string;
-        const body = input["body"] as string | undefined;
-        const base = input["base"] as string | undefined;
-        const draft = input["draft"] as boolean | undefined;
-        if (!title) return { content: "Error: title is required for create_pr", isError: true };
-
-        const args = [`gh pr create --title ${JSON.stringify(title)}`];
-        if (body) args.push(`--body ${JSON.stringify(body)}`);
-        if (base) args.push(`--base ${JSON.stringify(base)}`);
-        if (draft) args.push("--draft");
-        const out = execGh(args.join(" "), projectRoot);
-        return { content: `PR created:\n${out.trim()}`, isError: false };
-      }
-
-      case "view_pr": {
-        const number = input["number"] as number | undefined;
-        if (!number) return { content: "Error: number is required for view_pr", isError: true };
-        const out = execGh(
-          `gh pr view ${number} --json title,state,url,body,author,reviewDecision,mergeable,additions,deletions,changedFiles`,
-          projectRoot,
-        );
-        const pr = JSON.parse(out);
-        const lines = [
-          `**#${number}: ${pr.title}** [${pr.state}]`,
-          `Author: ${pr.author?.login ?? "unknown"} | Review: ${pr.reviewDecision ?? "NONE"}`,
-          `Mergeable: ${pr.mergeable ?? "unknown"} | +${pr.additions ?? 0} -${pr.deletions ?? 0} (${pr.changedFiles ?? 0} files)`,
-          `URL: ${pr.url}`,
-        ];
-        if (pr.body) lines.push("", pr.body.slice(0, 1000));
-        return { content: lines.join("\n"), isError: false };
-      }
-
-      case "review_pr": {
-        const number = input["number"] as number | undefined;
-        const reviewAction = input["review_action"] as string | undefined;
-        const body = input["body"] as string | undefined;
-        if (!number) return { content: "Error: number is required for review_pr", isError: true };
-
-        const validReviewActions = ["approve", "request-changes", "comment"];
-        const ra = reviewAction || "comment";
-        if (!validReviewActions.includes(ra)) {
-          return {
-            content: `Error: review_action must be one of: ${validReviewActions.join(", ")}`,
-            isError: true,
-          };
-        }
-
-        const args = [`gh pr review ${number} --${ra}`];
-        if (body) args.push(`--body ${JSON.stringify(body)}`);
-        const out = execGh(args.join(" "), projectRoot);
-        return { content: `PR #${number} reviewed (${ra}):\n${out.trim()}`, isError: false };
-      }
-
-      case "merge_pr": {
-        const number = input["number"] as number | undefined;
-        const method = input["merge_method"] as string | undefined;
-        if (!number) return { content: "Error: number is required for merge_pr", isError: true };
-
-        const validMethods = ["merge", "squash", "rebase"];
-        const mm = method || "merge";
-        if (!validMethods.includes(mm)) {
-          return {
-            content: `Error: merge_method must be one of: ${validMethods.join(", ")}`,
-            isError: true,
-          };
-        }
-
-        const out = execGh(`gh pr merge ${number} --${mm}`, projectRoot);
-        return { content: `PR #${number} merged (${mm}):\n${out.trim()}`, isError: false };
-      }
-
-      case "list_prs": {
-        const state = (input["state"] as string) || "open";
-        const limit =
-          typeof input["limit"] === "number" ? Math.min(input["limit"] as number, 50) : 10;
-        const out = execGh(
-          `gh pr list --state ${state} --limit ${limit} --json number,title,state,url,author,createdAt,headRefName`,
-          projectRoot,
-        );
-        const prs = JSON.parse(out) as Array<{
-          number?: number;
-          title?: string;
-          state?: string;
-          url?: string;
-          author?: { login?: string };
-          createdAt?: string;
-          headRefName?: string;
-        }>;
-        if (prs.length === 0) return { content: `No ${state} PRs found.`, isError: false };
-        const lines = prs.map(
-          (pr, i) =>
-            `${i + 1}. #${pr.number ?? "?"} **${pr.title ?? "untitled"}** [${pr.state ?? "?"}]\n   Branch: ${pr.headRefName ?? "?"} | Author: ${pr.author?.login ?? "?"}\n   ${pr.url ?? ""}`,
-        );
-        return {
-          content: `PRs (${state}, ${prs.length} results):\n\n${lines.join("\n\n")}`,
-          isError: false,
-        };
-      }
-
-      // ---- Issue operations ----
-      case "create_issue": {
-        const title = input["title"] as string;
-        const body = input["body"] as string | undefined;
-        const labels = input["labels"] as string[] | string | undefined;
-        if (!title) return { content: "Error: title is required for create_issue", isError: true };
-
-        const args = [`gh issue create --title ${JSON.stringify(title)}`];
-        if (body) args.push(`--body ${JSON.stringify(body)}`);
-        if (labels) {
-          const labelList = Array.isArray(labels) ? labels.join(",") : labels;
-          args.push(`--label ${JSON.stringify(labelList)}`);
-        }
-        const out = execGh(args.join(" "), projectRoot);
-        return { content: `Issue created:\n${out.trim()}`, isError: false };
-      }
-
-      case "comment_issue": {
-        const number = input["number"] as number | undefined;
-        const body = input["body"] as string | undefined;
-        if (!number)
-          return { content: "Error: number is required for comment_issue", isError: true };
-        if (!body) return { content: "Error: body is required for comment_issue", isError: true };
-
-        const out = execGh(
-          `gh issue comment ${number} --body ${JSON.stringify(body)}`,
-          projectRoot,
-        );
-        return { content: `Comment added to #${number}:\n${out.trim()}`, isError: false };
-      }
-
-      case "close_issue": {
-        const number = input["number"] as number | undefined;
-        const reason = input["reason"] as string | undefined;
-        if (!number) return { content: "Error: number is required for close_issue", isError: true };
-
-        const args = [`gh issue close ${number}`];
-        if (reason) args.push(`--reason ${JSON.stringify(reason)}`);
-        const out = execGh(args.join(" "), projectRoot);
-        return { content: `Issue #${number} closed:\n${out.trim()}`, isError: false };
-      }
-
-      case "list_issues": {
-        const state = (input["state"] as string) || "open";
-        const limit =
-          typeof input["limit"] === "number" ? Math.min(input["limit"] as number, 50) : 10;
-        const labels = input["labels"] as string[] | string | undefined;
-        const args = [
-          `gh issue list --state ${state} --limit ${limit} --json number,title,state,url,author,createdAt,labels`,
-        ];
-        if (labels) {
-          const labelList = Array.isArray(labels) ? labels.join(",") : labels;
-          args.push(`--label ${JSON.stringify(labelList)}`);
-        }
-        const out = execGh(args.join(" "), projectRoot);
-        const issues = JSON.parse(out) as Array<{
-          number?: number;
-          title?: string;
-          state?: string;
-          url?: string;
-          author?: { login?: string };
-          labels?: Array<{ name?: string }>;
-        }>;
-        if (issues.length === 0) return { content: `No ${state} issues found.`, isError: false };
-        const lines = issues.map((iss, i) => {
-          const lbls = iss.labels
-            ?.map((l) => l.name)
-            .filter(Boolean)
-            .join(", ");
-          return `${i + 1}. #${iss.number ?? "?"} **${iss.title ?? "untitled"}** [${iss.state ?? "?"}]${lbls ? `\n   Labels: ${lbls}` : ""}\n   ${iss.url ?? ""}`;
-        });
-        return {
-          content: `Issues (${state}, ${issues.length} results):\n\n${lines.join("\n\n")}`,
-          isError: false,
-        };
-      }
-
-      // ---- Workflow operations ----
-      case "trigger_workflow": {
-        const workflow = input["workflow"] as string | undefined;
-        const ref = input["ref"] as string | undefined;
-        if (!workflow)
-          return { content: "Error: workflow is required for trigger_workflow", isError: true };
-
-        const args = [`gh workflow run ${JSON.stringify(workflow)}`];
-        if (ref) args.push(`--ref ${JSON.stringify(ref)}`);
-        const out = execGh(args.join(" "), projectRoot);
-        return {
-          content: `Workflow triggered:\n${out.trim() || "(dispatched successfully)"}`,
-          isError: false,
-        };
-      }
-
-      case "view_run": {
-        const runId = input["run_id"] as string | number | undefined;
-        if (!runId) return { content: "Error: run_id is required for view_run", isError: true };
-
-        const out = execGh(
-          `gh run view ${runId} --json status,conclusion,name,url,createdAt,updatedAt,headBranch,event`,
-          projectRoot,
-        );
-        const run = JSON.parse(out);
-        const lines = [
-          `**${run.name ?? "Run"}** [${run.status}${run.conclusion ? ` — ${run.conclusion}` : ""}]`,
-          `Branch: ${run.headBranch ?? "?"} | Event: ${run.event ?? "?"}`,
-          `Created: ${run.createdAt ?? "?"} | Updated: ${run.updatedAt ?? "?"}`,
-          `URL: ${run.url ?? "N/A"}`,
-        ];
-        return { content: lines.join("\n"), isError: false };
-      }
-
-      default:
-        return { content: `Unknown action: ${action}`, isError: true };
+      case "search_prs":
+        return toolGitHubSearch({ ...input, type: action.replace("search_", "") }, projectRoot);
+      case "create_pr":         return ghOpCreatePr(input, projectRoot);
+      case "view_pr":           return ghOpViewPr(input, projectRoot);
+      case "review_pr":         return ghOpReviewPr(input, projectRoot);
+      case "merge_pr":          return ghOpMergePr(input, projectRoot);
+      case "list_prs":          return ghOpListPrs(input, projectRoot);
+      case "create_issue":      return ghOpCreateIssue(input, projectRoot);
+      case "comment_issue":     return ghOpCommentIssue(input, projectRoot);
+      case "close_issue":       return ghOpCloseIssue(input, projectRoot);
+      case "list_issues":       return ghOpListIssues(input, projectRoot);
+      case "trigger_workflow":  return ghOpTriggerWorkflow(input, projectRoot);
+      case "view_run":          return ghOpViewRun(input, projectRoot);
+      default:                  return { content: `Unknown action: ${action}`, isError: true };
     }
   } catch (err: unknown) {
-    const error = err as { stderr?: string; message?: string };
-    const stderr = typeof error.stderr === "string" ? error.stderr : "";
-    if (stderr.includes("gh: command not found") || stderr.includes("not recognized")) {
-      return {
-        content:
-          "Error: GitHub CLI (gh) is not installed or not in PATH. Install from https://cli.github.com/",
-        isError: true,
-      };
-    }
-    if (stderr.includes("not logged in") || stderr.includes("auth login")) {
-      return {
-        content: "Error: GitHub CLI is not authenticated. Run `gh auth login` first.",
-        isError: true,
-      };
-    }
-    const message = stderr || (err instanceof Error ? err.message : String(err));
-    return { content: `GitHubOps error: ${message}`, isError: true };
+    return formatGhError(err);
   }
 }
 
@@ -2163,6 +2123,170 @@ async function toolDebugSession(
  * @param sandboxEnabled - When true, dangerous commands and out-of-root writes are blocked.
  * @returns The tool execution result.
  */
+/**
+ * Pre-flight safety gates for executeTool. Returns the blocked ToolResult
+ * if any gate fails, or null to let the dispatcher proceed.
+ *
+ * Gates (in order): sandbox path/command checks for Write/Edit/Bash, sandbox
+ * ban on GitPush, repo-internal-cd-chain rejection for Bash, self-modification
+ * audit + protected-target check for Write/Edit, generic write-safety regex,
+ * secret detection on Write content.
+ */
+async function checkExecutionGates(
+  name: string,
+  input: Record<string, unknown>,
+  projectRoot: string,
+  context: CliToolExecutionContext,
+): Promise<ToolResult | null> {
+  if (context.sandboxEnabled && (name === "Write" || name === "Edit")) {
+    const fp = input["file_path"] as string | undefined;
+    if (fp) {
+      const blocked = sandboxCheckPath(fp, projectRoot, true);
+      if (blocked) return blocked;
+    }
+  }
+  if (context.sandboxEnabled && name === "Bash") {
+    const cmd = input["command"] as string | undefined;
+    if (cmd) {
+      const blocked = sandboxCheckCommand(cmd, true);
+      if (blocked) return blocked;
+    }
+  }
+  if (context.sandboxEnabled && name === "GitPush") {
+    return {
+      toolName: "GitPush",
+      content: "Sandbox: git push is blocked while sandbox mode is enabled. Disable sandbox to push to a remote.",
+      isError: true,
+      ok: false,
+    };
+  }
+  if (name === "Bash") {
+    const command = input["command"] as string | undefined;
+    if (command && isRepoInternalCdChain(command, projectRoot)) {
+      return {
+        toolName: "Bash",
+        content: "Error: Run this from the repository root instead of chaining `cd ... &&`. Re-issue the command from the root worktree so verification and audit paths stay consistent.",
+        isError: true,
+        ok: false,
+      };
+    }
+  }
+  if (name === "Write" || name === "Edit") {
+    const blocked = await checkWriteEditGate(name, input, projectRoot, context);
+    if (blocked) return blocked;
+  }
+  return null;
+}
+
+/** Self-modification audit + protected-target check + write-safety regex +
+ * (for Write only) secret detection. Returns the blocking ToolResult or null. */
+async function checkWriteEditGate(
+  name: string,
+  input: Record<string, unknown>,
+  projectRoot: string,
+  context: CliToolExecutionContext,
+): Promise<ToolResult | null> {
+  const fp = input["file_path"] as string | undefined;
+  if (fp) {
+    if (isProtectedWriteTarget(fp, projectRoot)) {
+      await appendSelfModificationAudit(projectRoot, context, "self_modification_attempt", fp);
+      if (!isSelfImprovementWriteAllowed(fp, projectRoot, context.selfImprovement)) {
+        await appendSelfModificationAudit(projectRoot, context, "self_modification_denied", fp);
+        return {
+          toolName: name as ToolName,
+          content: `Self-modification blocked: ${fp}. Protected source edits require an explicit self-improvement workflow such as /autoforge --self-improve or /party --autoforge.`,
+          isError: true,
+          ok: false,
+        };
+      }
+      await appendSelfModificationAudit(projectRoot, context, "self_modification_allowed", fp);
+    }
+    const writeBlock = checkWriteSafety(fp);
+    if (writeBlock) {
+      return { toolName: name as ToolName, content: `SAFETY: ${writeBlock}`, isError: true, ok: false };
+    }
+  }
+  if (name === "Write") {
+    const content = input["content"] as string | undefined;
+    if (content) {
+      const secretWarning = checkContentForSecrets(content);
+      if (secretWarning) {
+        return {
+          toolName: "Write",
+          content: `SAFETY: ${secretWarning}. Use environment variables instead of hardcoding secrets.`,
+          isError: true,
+          ok: false,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+/** Tool dispatch table — name → handler. Defined as a const so the
+ * dispatcher reads as data, not nested control flow. */
+async function dispatchToolByName(
+  name: string,
+  input: Record<string, unknown>,
+  projectRoot: string,
+  context: CliToolExecutionContext,
+): Promise<ToolResult> {
+  switch (name) {
+    case "Read":              return toolRead(input, projectRoot, context);
+    case "Write":             return toolWrite(input, projectRoot, context);
+    case "Edit":              return toolEdit(input, projectRoot, context);
+    case "Bash":              return toolBash(input, projectRoot);
+    case "Glob":              return toolGlob(input, projectRoot);
+    case "Grep":              return toolGrep(input, projectRoot);
+    case "GitCommit":         return toolGitCommit(input, projectRoot);
+    case "GitPush":           return toolGitPush(input, projectRoot);
+    case "TodoWrite":         return toolTodoWrite(input, projectRoot);
+    case "WebSearch":         return toolWebSearch(input, projectRoot);
+    case "WebFetch":          return toolWebFetch(input, projectRoot);
+    case "SubAgent":          return toolSubAgent(input, projectRoot, context);
+    case "GitHubSearch":      return toolGitHubSearch(input, projectRoot);
+    case "GitHubOps":         return toolGitHubOps(input, projectRoot);
+    case "BrowserAction":     return toolBrowserAction(input, projectRoot);
+    case "Screenshot":        return toolScreenshot(input, projectRoot);
+    case "RunTests":          return toolRunTests(input, projectRoot);
+    case "DebugSession":      return toolDebugSession(input, projectRoot);
+    case "ScreenshotToCode":  return toolScreenshotToCode(input, projectRoot);
+    default:                  return { toolName: "Bash" as ToolName, content: `Unknown tool: ${name}`, isError: true, ok: false };
+  }
+}
+
+/** Audit-event recording for file-modifying tools. Failures non-fatal. */
+async function recordToolAuditEvent(
+  name: string,
+  input: Record<string, unknown>,
+  result: ToolResult,
+  projectRoot: string,
+  context: CliToolExecutionContext,
+): Promise<void> {
+  const auditTypeMap: Record<string, string> = {
+    Write: "file_write",
+    Edit: "file_edit",
+    Bash: "bash_execute",
+    GitCommit: "git_commit",
+    GitPush: "git_push",
+  };
+  if (!(name in auditTypeMap)) return;
+  try {
+    await appendAuditEvent(projectRoot, {
+      sessionId: context.sessionId ?? "cli-session",
+      timestamp: new Date().toISOString(),
+      type: auditTypeMap[name]! as "file_write" | "file_edit" | "bash_execute" | "git_commit" | "git_push",
+      payload: {
+        tool: name,
+        input: sanitizeForAudit(input),
+        success: !result.isError,
+      },
+      modelId: "cli",
+      projectRoot,
+    });
+  } catch { /* audit logging failures should not break tool execution */ }
+}
+
 export async function executeTool(
   name: string,
   input: Record<string, unknown>,
@@ -2172,192 +2296,20 @@ export async function executeTool(
 ): Promise<ToolResult> {
   const context = normalizeExecutionContext(sessionOrContext, sandboxEnabled);
 
-  // Sandbox: check file path for Write/Edit
-  if (context.sandboxEnabled && (name === "Write" || name === "Edit")) {
-    const fp = input["file_path"] as string | undefined;
-    if (fp) {
-      const blocked = sandboxCheckPath(fp, projectRoot, true);
-      if (blocked) return blocked;
-    }
-  }
+  const blocked = await checkExecutionGates(name, input, projectRoot, context);
+  if (blocked) return blocked;
 
-  // Sandbox: check command for Bash
-  if (context.sandboxEnabled && name === "Bash") {
-    const cmd = input["command"] as string | undefined;
-    if (cmd) {
-      const blocked = sandboxCheckCommand(cmd, true);
-      if (blocked) return blocked;
-    }
-  }
-
-  if (context.sandboxEnabled && name === "GitPush") {
-    return {
-      toolName: "GitPush",
-      content:
-        "Sandbox: git push is blocked while sandbox mode is enabled. Disable sandbox to push to a remote.",
-      isError: true,
-      ok: false,
-    };
-  }
-
-  if (name === "Bash") {
-    const command = input["command"] as string | undefined;
-    if (command && isRepoInternalCdChain(command, projectRoot)) {
-      return {
-        toolName: "Bash",
-        content:
-          "Error: Run this from the repository root instead of chaining `cd ... &&`. Re-issue the command from the root worktree so verification and audit paths stay consistent.",
-        isError: true,
-        ok: false,
-      };
-    }
-  }
-
-  // Write/Edit safety hooks (always active, not just sandbox mode)
-  if (name === "Write" || name === "Edit") {
-    const fp = input["file_path"] as string | undefined;
-    if (fp) {
-      if (isProtectedWriteTarget(fp, projectRoot)) {
-        await appendSelfModificationAudit(projectRoot, context, "self_modification_attempt", fp);
-        if (!isSelfImprovementWriteAllowed(fp, projectRoot, context.selfImprovement)) {
-          await appendSelfModificationAudit(projectRoot, context, "self_modification_denied", fp);
-          return {
-            toolName: name as ToolName,
-            content: `Self-modification blocked: ${fp}. Protected source edits require an explicit self-improvement workflow such as /autoforge --self-improve or /party --autoforge.`,
-            isError: true,
-            ok: false,
-          };
-        }
-        await appendSelfModificationAudit(projectRoot, context, "self_modification_allowed", fp);
-      }
-
-      const writeBlock = checkWriteSafety(fp);
-      if (writeBlock) {
-        return { toolName: name as ToolName, content: `SAFETY: ${writeBlock}`, isError: true, ok: false };
-      }
-    }
-    if (name === "Write") {
-      const content = input["content"] as string | undefined;
-      if (content) {
-        const secretWarning = checkContentForSecrets(content);
-        if (secretWarning) {
-          return {
-            toolName: "Write",
-            content: `SAFETY: ${secretWarning}. Use environment variables instead of hardcoding secrets.`,
-            isError: true,
-            ok: false,
-          };
-        }
-      }
-    }
-  }
-
-  // Dim 30 — Action risk badge: surface risk level before execution (OpenHands pattern)
+  // Dim 30 — Action risk badge: surface risk level before execution.
   const actionRisk = rateActionRisk(name, input);
   if (actionRisk !== "safe") {
-    const badge = renderActionBadge(actionRisk);
-    process.stdout.write(`\x1b[2m${badge} ${name}\x1b[0m\n`);
+    process.stdout.write(`\x1b[2m${renderActionBadge(actionRisk)} ${name}\x1b[0m\n`);
   }
 
-  let result: ToolResult;
   const stopLatencyTimer = globalLatencyTracker.startTimer("tool-exec", name);
-
-  switch (name) {
-    case "Read":
-      result = await toolRead(input, projectRoot, context);
-      break;
-    case "Write":
-      result = await toolWrite(input, projectRoot, context);
-      break;
-    case "Edit":
-      result = await toolEdit(input, projectRoot, context);
-      break;
-    case "Bash":
-      result = await toolBash(input, projectRoot);
-      break;
-    case "Glob":
-      result = await toolGlob(input, projectRoot);
-      break;
-    case "Grep":
-      result = await toolGrep(input, projectRoot);
-      break;
-    case "GitCommit":
-      result = await toolGitCommit(input, projectRoot);
-      break;
-    case "GitPush":
-      result = await toolGitPush(input, projectRoot);
-      break;
-    case "TodoWrite":
-      result = await toolTodoWrite(input, projectRoot);
-      break;
-    case "WebSearch":
-      result = await toolWebSearch(input, projectRoot);
-      break;
-    case "WebFetch":
-      result = await toolWebFetch(input, projectRoot);
-      break;
-    case "SubAgent":
-      result = await toolSubAgent(input, projectRoot, context);
-      break;
-    case "GitHubSearch":
-      result = await toolGitHubSearch(input, projectRoot);
-      break;
-    case "GitHubOps":
-      result = await toolGitHubOps(input, projectRoot);
-      break;
-    case "BrowserAction":
-      result = await toolBrowserAction(input, projectRoot);
-      break;
-    case "Screenshot":
-      result = await toolScreenshot(input, projectRoot);
-      break;
-    case "RunTests":
-      result = await toolRunTests(input, projectRoot);
-      break;
-    case "DebugSession":
-      result = await toolDebugSession(input, projectRoot);
-      break;
-    case "ScreenshotToCode":
-      result = await toolScreenshotToCode(input, projectRoot);
-      break;
-    default:
-      result = { toolName: "Bash" as ToolName, content: `Unknown tool: ${name}`, isError: true, ok: false };
-  }
-
+  const result = await dispatchToolByName(name, input, projectRoot, context);
   stopLatencyTimer();
 
-  // Record audit event for file-modifying tools
-  const auditableTools = new Set(["Write", "Edit", "Bash", "GitCommit", "GitPush"]);
-  if (auditableTools.has(name)) {
-    const auditTypeMap: Record<string, string> = {
-      Write: "file_write",
-      Edit: "file_edit",
-      Bash: "bash_execute",
-      GitCommit: "git_commit",
-      GitPush: "git_push",
-    };
-    try {
-      await appendAuditEvent(projectRoot, {
-        sessionId: context.sessionId ?? "cli-session",
-        timestamp: new Date().toISOString(),
-        type: auditTypeMap[name]! as
-          | "file_write"
-          | "file_edit"
-          | "bash_execute"
-          | "git_commit"
-          | "git_push",
-        payload: {
-          tool: name,
-          input: sanitizeForAudit(input),
-          success: !result.isError,
-        },
-        modelId: "cli",
-        projectRoot,
-      });
-    } catch {
-      // Audit logging failures should not break tool execution
-    }
-  }
+  await recordToolAuditEvent(name, input, result, projectRoot, context);
 
   return {
     ...result,
