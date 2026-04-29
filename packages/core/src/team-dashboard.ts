@@ -92,153 +92,138 @@ function applyFilter(events: AuditEvent[], filter?: DashboardFilter): AuditEvent
 /**
  * Compute dashboard metrics from a set of audit events.
  */
+/** Mutable accumulator threaded through the per-event scan. */
+interface DashboardAccumulator {
+  sessionIds: Set<string>;
+  sessionStartTimes: Map<string, number>;
+  sessionEndTimes: Map<string, number>;
+  eventCounts: Record<string, number>;
+  costByModel: Record<string, number>;
+  modelUsage: Record<string, number>;
+  sessionsPerDay: Record<string, number>;
+  totalCostUsd: number;
+  totalVerifications: number;
+  pdsePassCount: number;
+  pdseFailCount: number;
+  pdseScoreSum: number;
+  pdseScoreCount: number;
+  filesEdited: number;
+  lessonsRecorded: number;
+}
+
+function newDashboardAccumulator(): DashboardAccumulator {
+  return {
+    sessionIds: new Set<string>(),
+    sessionStartTimes: new Map<string, number>(),
+    sessionEndTimes: new Map<string, number>(),
+    eventCounts: {},
+    costByModel: {},
+    modelUsage: {},
+    sessionsPerDay: {},
+    totalCostUsd: 0,
+    totalVerifications: 0,
+    pdsePassCount: 0,
+    pdseFailCount: 0,
+    pdseScoreSum: 0,
+    pdseScoreCount: 0,
+    filesEdited: 0,
+    lessonsRecorded: 0,
+  };
+}
+
+function recordPdseScore(acc: DashboardAccumulator, payload: Record<string, unknown>): void {
+  const score = Number(payload["score"] ?? payload["overall"] ?? 0);
+  if (score > 0) {
+    acc.pdseScoreSum += score;
+    acc.pdseScoreCount++;
+  }
+}
+
+/** Single-pass accumulator over the filtered event stream. */
+function accumulateDashboardEvents(events: AuditEvent[]): DashboardAccumulator {
+  const acc = newDashboardAccumulator();
+  for (const event of events) {
+    acc.eventCounts[event.type] = (acc.eventCounts[event.type] ?? 0) + 1;
+    if (event.modelId) acc.modelUsage[event.modelId] = (acc.modelUsage[event.modelId] ?? 0) + 1;
+    acc.sessionIds.add(event.sessionId);
+
+    if (event.type === "session_start") {
+      const day = event.timestamp.slice(0, 10);
+      acc.sessionsPerDay[day] = (acc.sessionsPerDay[day] ?? 0) + 1;
+      const ts = new Date(event.timestamp).getTime();
+      const existing = acc.sessionStartTimes.get(event.sessionId);
+      if (!existing || ts < existing) acc.sessionStartTimes.set(event.sessionId, ts);
+    }
+    if (event.type === "session_end") {
+      const ts = new Date(event.timestamp).getTime();
+      const existing = acc.sessionEndTimes.get(event.sessionId);
+      if (!existing || ts > existing) acc.sessionEndTimes.set(event.sessionId, ts);
+    }
+    if (event.type === "cost_update") {
+      const cost = Number(event.payload["costUsd"] ?? 0);
+      acc.totalCostUsd += cost;
+      if (event.modelId) acc.costByModel[event.modelId] = (acc.costByModel[event.modelId] ?? 0) + cost;
+    }
+    if (event.type === "autoforge_start") acc.totalVerifications++;
+    if (event.type === "pdse_gate_pass") { acc.pdsePassCount++; recordPdseScore(acc, event.payload); }
+    if (event.type === "pdse_gate_fail") { acc.pdseFailCount++; recordPdseScore(acc, event.payload); }
+    if (event.type === "file_write" || event.type === "file_edit") acc.filesEdited++;
+    if (event.type === "lesson_record") acc.lessonsRecorded++;
+  }
+  return acc;
+}
+
+/** Average session duration in minutes from start/end timestamp maps. */
+function averageSessionDuration(
+  startTimes: Map<string, number>,
+  endTimes: Map<string, number>,
+): number {
+  let totalMin = 0;
+  let count = 0;
+  for (const [sid, startTs] of startTimes) {
+    const endTs = endTimes.get(sid);
+    if (endTs && endTs > startTs) {
+      totalMin += (endTs - startTs) / 60_000;
+      count++;
+    }
+  }
+  return count > 0 ? totalMin / count : 0;
+}
+
 export function computeDashboardMetrics(
   events: AuditEvent[],
   filter?: DashboardFilter,
 ): DashboardMetrics {
   const filtered = applyFilter(events, filter);
+  const acc = accumulateDashboardEvents(filtered);
 
-  // Track unique sessions, session start/end times, developers
-  const sessionIds = new Set<string>();
-  const sessionStartTimes = new Map<string, number>();
-  const sessionEndTimes = new Map<string, number>();
-  const eventCounts: Record<string, number> = {};
-  const costByModel: Record<string, number> = {};
-  const modelUsage: Record<string, number> = {};
-  const sessionsPerDay: Record<string, number> = {};
-
-  let totalCostUsd = 0;
-  let totalVerifications = 0;
-  let pdsePassCount = 0;
-  let pdseFailCount = 0;
-  let pdseScoreSum = 0;
-  let pdseScoreCount = 0;
-  let filesEdited = 0;
-  let lessonsRecorded = 0;
-
-  for (const event of filtered) {
-    // Count events by type
-    eventCounts[event.type] = (eventCounts[event.type] ?? 0) + 1;
-
-    // Track model usage
-    if (event.modelId) {
-      modelUsage[event.modelId] = (modelUsage[event.modelId] ?? 0) + 1;
-    }
-
-    // Track sessions
-    sessionIds.add(event.sessionId);
-
-    // Sessions per day (based on session_start events)
-    if (event.type === "session_start") {
-      const day = event.timestamp.slice(0, 10); // YYYY-MM-DD
-      sessionsPerDay[day] = (sessionsPerDay[day] ?? 0) + 1;
-
-      // Track session start time
-      const ts = new Date(event.timestamp).getTime();
-      const existing = sessionStartTimes.get(event.sessionId);
-      if (!existing || ts < existing) {
-        sessionStartTimes.set(event.sessionId, ts);
-      }
-    }
-
-    // Track session end time
-    if (event.type === "session_end") {
-      const ts = new Date(event.timestamp).getTime();
-      const existing = sessionEndTimes.get(event.sessionId);
-      if (!existing || ts > existing) {
-        sessionEndTimes.set(event.sessionId, ts);
-      }
-    }
-
-    // Cost tracking
-    if (event.type === "cost_update") {
-      const cost = Number(event.payload["costUsd"] ?? 0);
-      totalCostUsd += cost;
-      if (event.modelId) {
-        costByModel[event.modelId] = (costByModel[event.modelId] ?? 0) + cost;
-      }
-    }
-
-    // Autoforge / verification tracking
-    if (event.type === "autoforge_start") {
-      totalVerifications++;
-    }
-
-    // PDSE gate events
-    if (event.type === "pdse_gate_pass") {
-      pdsePassCount++;
-      const score = Number(event.payload["score"] ?? event.payload["overall"] ?? 0);
-      if (score > 0) {
-        pdseScoreSum += score;
-        pdseScoreCount++;
-      }
-    }
-    if (event.type === "pdse_gate_fail") {
-      pdseFailCount++;
-      const score = Number(event.payload["score"] ?? event.payload["overall"] ?? 0);
-      if (score > 0) {
-        pdseScoreSum += score;
-        pdseScoreCount++;
-      }
-    }
-
-    // File edits
-    if (event.type === "file_write" || event.type === "file_edit") {
-      filesEdited++;
-    }
-
-    // Lessons
-    if (event.type === "lesson_record") {
-      lessonsRecorded++;
-    }
-  }
-
-  // Compute pass rate
-  const totalGated = pdsePassCount + pdseFailCount;
-  const passRate = totalGated > 0 ? pdsePassCount / totalGated : 0;
-
-  // Average PDSE score
-  const averagePDSEScore = pdseScoreCount > 0 ? pdseScoreSum / pdseScoreCount : 0;
-
-  // Active developers: count unique sessionIds that have a session_start event
-  const starterSessions = new Set<string>();
-  for (const event of filtered) {
-    if (event.type === "session_start") {
-      starterSessions.add(event.sessionId);
-    }
-  }
-  const activeDevelopers = starterSessions.size;
-
-  // Total sessions (based on session_start events, or fall back to unique session IDs)
+  const totalGated = acc.pdsePassCount + acc.pdseFailCount;
+  const passRate = totalGated > 0 ? acc.pdsePassCount / totalGated : 0;
+  const averagePDSEScore = acc.pdseScoreCount > 0 ? acc.pdseScoreSum / acc.pdseScoreCount : 0;
+  const activeDevelopers = filtered.reduce((set, e) => {
+    if (e.type === "session_start") set.add(e.sessionId);
+    return set;
+  }, new Set<string>()).size;
   const totalSessions =
-    (eventCounts["session_start"] ?? 0) > 0 ? (eventCounts["session_start"] ?? 0) : sessionIds.size;
-
-  // Average session duration
-  let totalDurationMin = 0;
-  let durationCount = 0;
-  for (const [sid, startTs] of sessionStartTimes) {
-    const endTs = sessionEndTimes.get(sid);
-    if (endTs && endTs > startTs) {
-      totalDurationMin += (endTs - startTs) / 60_000;
-      durationCount++;
-    }
-  }
-  const averageSessionDurationMin = durationCount > 0 ? totalDurationMin / durationCount : 0;
+    (acc.eventCounts["session_start"] ?? 0) > 0
+      ? (acc.eventCounts["session_start"] ?? 0)
+      : acc.sessionIds.size;
+  const averageSessionDurationMin = averageSessionDuration(acc.sessionStartTimes, acc.sessionEndTimes);
 
   return {
     totalSessions,
-    totalVerifications,
+    totalVerifications: acc.totalVerifications,
     passRate,
     averagePDSEScore,
-    totalCostUsd,
-    costByModel,
-    eventCounts,
-    sessionsPerDay,
-    modelUsage,
+    totalCostUsd: acc.totalCostUsd,
+    costByModel: acc.costByModel,
+    eventCounts: acc.eventCounts,
+    sessionsPerDay: acc.sessionsPerDay,
+    modelUsage: acc.modelUsage,
     activeDevelopers,
     averageSessionDurationMin,
-    filesEdited,
-    lessonsRecorded,
+    filesEdited: acc.filesEdited,
+    lessonsRecorded: acc.lessonsRecorded,
   };
 }
 

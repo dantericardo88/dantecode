@@ -64,49 +64,7 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
         prompt: formatLessonsForPrompt(lessons),
       });
     },
-    semantic_search: async (args) => {
-      const projectRoot = requiredString(args, "projectRoot");
-      const query = requiredString(args, "query");
-      const limit = typeof args["limit"] === "number" ? args["limit"] : 10;
-      const index = new CodeIndex();
-
-      const loaded = await index.load(projectRoot);
-      if (!loaded) {
-        await index.buildIndex(projectRoot);
-        await index.save(projectRoot);
-      }
-
-      let queryEmbedding: number[] | undefined;
-      let mode: "tfidf" | "hybrid" = "tfidf";
-      const embeddingProviderInfo = index.getEmbeddingProviderInfo();
-
-      if (index.hasEmbeddings && embeddingProviderInfo) {
-        try {
-          const provider = createEmbeddingProvider(embeddingProviderInfo.provider, {
-            modelId: embeddingProviderInfo.modelId,
-            ...(embeddingProviderInfo.dimensions
-              ? { dimensions: embeddingProviderInfo.dimensions }
-              : {}),
-          });
-          queryEmbedding = await provider.embedSingle(query);
-          mode = "hybrid";
-        } catch {
-          mode = "tfidf";
-        }
-      }
-
-      const results = index.search(query, limit, queryEmbedding);
-      return serialize({
-        mode,
-        results: results.map((chunk) => ({
-          filePath: chunk.filePath.replace(/\\/g, "/"),
-          startLine: chunk.startLine,
-          endLine: chunk.endLine,
-          symbols: chunk.symbols,
-          snippet: chunk.content.slice(0, 240),
-        })),
-      });
-    },
+    semantic_search: handleSemanticSearch,
     record_lesson: async (args) => {
       const projectRoot = requiredString(args, "projectRoot");
       const pattern = requiredString(args, "pattern");
@@ -137,51 +95,97 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
 
       return serialize(lesson);
     },
-    autoforge_verify: async (args) => {
-      const projectRoot = requiredString(args, "projectRoot");
-      const taskDescription = optionalString(args, "taskDescription");
-      const requestedFilePaths = Array.isArray(args["filePaths"])
-        ? args["filePaths"].filter((value): value is string => typeof value === "string")
-        : [];
-      const filePaths =
-        requestedFilePaths.length > 0
-          ? requestedFilePaths
-          : await collectVerifiableFiles(projectRoot, 25);
-
-      const files = await Promise.all(
-        filePaths.map(async (filePath) => {
-          const absolutePath = join(projectRoot, filePath);
-          const code = await readFile(absolutePath, "utf-8");
-          const antiStub = runAntiStubScanner(code, projectRoot, filePath);
-          const constitution = runConstitutionCheck(code, filePath);
-          const pdse = runLocalPDSEScorer(code, projectRoot);
-
-          return {
-            filePath,
-            antiStubPassed: antiStub.passed,
-            constitutionPassed: constitution.passed,
-            pdsePassed: pdse.passedGate,
-            pdseOverall: pdse.overall,
-            hardViolations: antiStub.hardViolations.length,
-            constitutionViolations: constitution.violations.length,
-          };
-        }),
-      );
-
-      const succeeded = files.every(
-        (file) => file.antiStubPassed && file.constitutionPassed && file.pdsePassed,
-      );
-
-      return serialize({
-        projectRoot,
-        ...(taskDescription ? { taskDescription } : {}),
-        succeeded,
-        verifiedFiles: files.length,
-        files,
-      });
-    },
+    autoforge_verify: handleAutoforgeVerify,
   };
 }
+
+const handleSemanticSearch: ToolHandler = async (args) => {
+  const projectRoot = requiredString(args, "projectRoot");
+  const query = requiredString(args, "query");
+  const limit = typeof args["limit"] === "number" ? args["limit"] : 10;
+  const index = new CodeIndex();
+
+  const loaded = await index.load(projectRoot);
+  if (!loaded) {
+    await index.buildIndex(projectRoot);
+    await index.save(projectRoot);
+  }
+
+  let queryEmbedding: number[] | undefined;
+  let mode: "tfidf" | "hybrid" = "tfidf";
+  const embeddingProviderInfo = index.getEmbeddingProviderInfo();
+
+  if (index.hasEmbeddings && embeddingProviderInfo) {
+    try {
+      const provider = createEmbeddingProvider(embeddingProviderInfo.provider, {
+        modelId: embeddingProviderInfo.modelId,
+        ...(embeddingProviderInfo.dimensions
+          ? { dimensions: embeddingProviderInfo.dimensions }
+          : {}),
+      });
+      queryEmbedding = await provider.embedSingle(query);
+      mode = "hybrid";
+    } catch {
+      mode = "tfidf";
+    }
+  }
+
+  const results = index.search(query, limit, queryEmbedding);
+  return serialize({
+    mode,
+    results: results.map((chunk) => ({
+      filePath: chunk.filePath.replace(/\\/g, "/"),
+      startLine: chunk.startLine,
+      endLine: chunk.endLine,
+      symbols: chunk.symbols,
+      snippet: chunk.content.slice(0, 240),
+    })),
+  });
+};
+
+const handleAutoforgeVerify: ToolHandler = async (args) => {
+  const projectRoot = requiredString(args, "projectRoot");
+  const taskDescription = optionalString(args, "taskDescription");
+  const requestedFilePaths = Array.isArray(args["filePaths"])
+    ? args["filePaths"].filter((value): value is string => typeof value === "string")
+    : [];
+  const filePaths =
+    requestedFilePaths.length > 0
+      ? requestedFilePaths
+      : await collectVerifiableFiles(projectRoot, 25);
+
+  const files = await Promise.all(
+    filePaths.map(async (filePath) => {
+      const absolutePath = join(projectRoot, filePath);
+      const code = await readFile(absolutePath, "utf-8");
+      const antiStub = runAntiStubScanner(code, projectRoot, filePath);
+      const constitution = runConstitutionCheck(code, filePath);
+      const pdse = runLocalPDSEScorer(code, projectRoot);
+
+      return {
+        filePath,
+        antiStubPassed: antiStub.passed,
+        constitutionPassed: constitution.passed,
+        pdsePassed: pdse.passedGate,
+        pdseOverall: pdse.overall,
+        hardViolations: antiStub.hardViolations.length,
+        constitutionViolations: constitution.violations.length,
+      };
+    }),
+  );
+
+  const succeeded = files.every(
+    (file) => file.antiStubPassed && file.constitutionPassed && file.pdsePassed,
+  );
+
+  return serialize({
+    projectRoot,
+    ...(taskDescription ? { taskDescription } : {}),
+    succeeded,
+    verifiedFiles: files.length,
+    files,
+  });
+};
 
 async function collectVerifiableFiles(projectRoot: string, limit: number): Promise<string[]> {
   const results: string[] = [];
