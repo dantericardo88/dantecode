@@ -141,30 +141,33 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 }
 
-function activateInner(context: vscode.ExtensionContext): void {
-  const extensionUri = context.extensionUri;
-
-  // ── Reload-notification infrastructure ──
+function setupReloadNotification(context: vscode.ExtensionContext): void {
   // On fresh activation (after a reload), silently delete any pending marker so the
   // file watcher below doesn't fire again in the same window session.
-  const _reloadMarker = path.join(extensionUri.fsPath, "dist", "RELOAD_NEEDED");
-  if (existsSync(_reloadMarker)) {
-    try { unlinkSync(_reloadMarker); } catch { /* ignore */ }
+  const reloadMarker = path.join(context.extensionUri.fsPath, "dist", "RELOAD_NEEDED");
+  if (existsSync(reloadMarker)) {
+    try { unlinkSync(reloadMarker); } catch { /* ignore */ }
   }
   // Watch for the marker file that deploy-local.mjs creates after each build.
   // Fires while the OLD extension is running — prompts the user to reload.
-  const _reloadWatcher = vscode.workspace.createFileSystemWatcher(_reloadMarker);
-  _reloadWatcher.onDidCreate(() => {
+  const reloadWatcher = vscode.workspace.createFileSystemWatcher(reloadMarker);
+  reloadWatcher.onDidCreate(() => {
     vscode.window.showInformationMessage(
       "DanteCode was rebuilt. Reload window to activate the latest fixes.",
-      "Reload Now"
+      "Reload Now",
     ).then((sel) => {
       if (sel === "Reload Now") {
         vscode.commands.executeCommand("workbench.action.reloadWindow");
       }
     });
   });
-  context.subscriptions.push(_reloadWatcher);
+  context.subscriptions.push(reloadWatcher);
+}
+
+function activateInner(context: vscode.ExtensionContext): void {
+  const extensionUri = context.extensionUri;
+
+  setupReloadNotification(context);
 
   // ── Repo map tree ──
   const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
