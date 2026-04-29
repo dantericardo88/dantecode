@@ -19,10 +19,10 @@
 //   5. Astropy plugin disabled via pytest flag
 // ============================================================================
 
-import { execFile as execFileCb } from "node:child_process";
+import { execFile as execFileCb, spawnSync } from "node:child_process";
 import { mkdir, readFile, writeFile, rm, access } from "node:fs/promises";
-import { createReadStream } from "node:fs";
-import { join, resolve } from "node:path";
+import { createReadStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
@@ -88,6 +88,27 @@ export interface SWEEvalOptions {
   parallel?: number;
   /** Skip git clone if workspace directory already exists. */
   useCachedClone?: boolean;
+}
+
+export interface SWECalibrationResult {
+  instance_id: string;
+  baselineReproduced: boolean;
+  goldResolved: boolean;
+  failureClass: "resolved" | "env_error" | "test_patch_error" | "baseline_not_reproduced" | "timeout" | "infra";
+  baselineOutput?: string;
+  verificationOutput?: string;
+  error?: string;
+  duration_ms: number;
+}
+
+export interface SWECalibrationReport {
+  runId: string;
+  total: number;
+  reproducedBaseline: number;
+  goldResolved: number;
+  passRate: number;
+  results: SWECalibrationResult[];
+  generatedAt: string;
 }
 
 // ----------------------------------------------------------------------------
@@ -414,6 +435,58 @@ async function runDanteCode(
  * verifies with pytest. Returns a SWERunResult with resolved=true if all
  * FAIL_TO_PASS tests pass after agent intervention.
  */
+/** Apply the test patch (when present) and run the conftest pre-flight gate. */
+async function prepareSWEBenchWorkspace(
+  instance: SWEInstance,
+  workspace: string,
+  result: SWERunResult,
+): Promise<boolean> {
+  if (instance.test_patch) {
+    if (!(await applyPatch(instance.test_patch, workspace))) {
+      result.error = "Test patch failed to apply";
+      return false;
+    }
+  }
+  // Pattern C mitigation — scientific Python repos register pytest plugins in
+  // conftest. ImportError during collection masquerades as test_assertion and
+  // makes the agent "fix" working code. This gate stops the cycle.
+  const collectStatus = await runPytestCollectOnly(workspace);
+  if (collectStatus.failed) {
+    result.error = `env_error: pytest collection failed (${collectStatus.reason})`;
+    result.test_output = collectStatus.output;
+    return false;
+  }
+  return true;
+}
+
+/** Pre-execute FAIL_TO_PASS tests to prime the agent (CodeAct). */
+async function primeAgentWithFailingTests(instance: SWEInstance, workspace: string): Promise<string> {
+  const failToPassEarly = instance.FAIL_TO_PASS ?? instance.fail_to_pass ?? [];
+  if (failToPassEarly.length === 0) return "";
+  try {
+    const pre = await runTests(failToPassEarly, workspace);
+    return pre.passed ? "" : pre.output;
+  } catch {
+    return "";
+  }
+}
+
+async function captureAgentPatchAndVerify(
+  instance: SWEInstance,
+  workspace: string,
+  result: SWERunResult,
+): Promise<void> {
+  const diffResult = await run("git", ["diff", "HEAD"], { cwd: workspace, timeout: 30_000 });
+  result.model_patch = diffResult.stdout.slice(0, 10_000);
+
+  const failToPass = instance.FAIL_TO_PASS ?? instance.fail_to_pass ?? [];
+  const passToPass = instance.PASS_TO_PASS ?? instance.pass_to_pass ?? [];
+  const allSpecs = [...failToPass, ...passToPass];
+  const { passed, output } = await runTests(allSpecs.length > 0 ? allSpecs : ["tests/"], workspace);
+  result.resolved = passed;
+  result.test_output = output;
+}
+
 export async function runSWEBenchInstance(
   instance: SWEInstance,
   _projectRoot: string,
@@ -422,10 +495,7 @@ export async function runSWEBenchInstance(
   const model = options.model ?? process.env["DANTECODE_MODEL"] ?? DEFAULT_MODEL;
   const timeoutMs = selectInstanceTimeout(instance.repo, options.timeout);
   const startTime = Date.now();
-
-  // Use a temp workspace to avoid polluting the project
-  const workspaceBase = join(tmpdir(), "dantecode-swe-bench");
-  const workspace = join(workspaceBase, instance.instance_id);
+  const workspace = join(tmpdir(), "dantecode-swe-bench", instance.instance_id);
 
   const result: SWERunResult = {
     instance_id: instance.instance_id,
@@ -436,83 +506,22 @@ export async function runSWEBenchInstance(
   };
 
   try {
-    // Clean up any stale workspace (skip if using cached clone)
-    if (!options.useCachedClone) {
-      await rm(workspace, { recursive: true, force: true });
-    }
+    if (!options.useCachedClone) await rm(workspace, { recursive: true, force: true });
     await mkdir(workspace, { recursive: true });
 
-    // Step 1: Setup
-    const setupOk = await setupEnvironment(instance, workspace, options.useCachedClone);
-    if (!setupOk) {
+    if (!(await setupEnvironment(instance, workspace, options.useCachedClone))) {
       result.error = "Environment setup failed";
       return result;
     }
+    if (!(await prepareSWEBenchWorkspace(instance, workspace, result))) return result;
 
-    // Step 2: Apply test patch (reveals what we need to fix)
-    if (instance.test_patch) {
-      const patchOk = await applyPatch(instance.test_patch, workspace);
-      if (!patchOk) {
-        result.error = "Test patch failed to apply";
-        return result;
-      }
-    }
-
-    // Step 2.25: Pre-flight pytest --collect-only. Pattern C mitigation —
-    // scientific Python repos register pytest plugins in conftest. When
-    // setup is incomplete (egg-info mismatch, missing C-extension build),
-    // collection fails with ImportError BEFORE any test runs. Without this
-    // gate the agent counts that as test_assertion and tries to "fix"
-    // working code, often making things worse.
-    const collectStatus = await runPytestCollectOnly(workspace);
-    if (collectStatus.failed) {
-      result.error = `env_error: pytest collection failed (${collectStatus.reason})`;
-      result.test_output = collectStatus.output;
-      return result;
-    }
-
-    // Step 2.5: Pre-execute the failing tests to prime the agent (CodeAct).
-    // Cap at 60s — pre-exec is supposed to fail fast; if it hangs that's
-    // an env issue, not a stack-trace source we want.
-    const failToPassEarly = instance.FAIL_TO_PASS ?? instance.fail_to_pass ?? [];
-    let priming = "";
-    if (failToPassEarly.length > 0) {
-      try {
-        const pre = await runTests(failToPassEarly, workspace);
-        if (!pre.passed) priming = pre.output;
-      } catch {
-        // Pre-execute failure is non-fatal — agent continues without priming.
-      }
-    }
-
-    // Step 3: Run DanteCode agent
-    await runDanteCode(
-      instance.problem_statement,
-      instance.hints_text,
-      workspace,
-      model,
-      timeoutMs,
-      priming,
-    );
-
-    // Step 4: Capture the agent's patch
-    const diffResult = await run("git", ["diff", "HEAD"], { cwd: workspace, timeout: 30_000 });
-    result.model_patch = diffResult.stdout.slice(0, 10_000);
-
-    // Step 5: Verify resolution
-    const failToPass = (instance.FAIL_TO_PASS ?? instance.fail_to_pass ?? []);
-    const passToPass = (instance.PASS_TO_PASS ?? instance.pass_to_pass ?? []);
-    const allSpecs = [...failToPass, ...passToPass];
-
-    const { passed, output } = await runTests(allSpecs.length > 0 ? allSpecs : ["tests/"], workspace);
-    result.resolved = passed;
-    result.test_output = output;
-
+    const priming = await primeAgentWithFailingTests(instance, workspace);
+    await runDanteCode(instance.problem_statement, instance.hints_text, workspace, model, timeoutMs, priming);
+    await captureAgentPatchAndVerify(instance, workspace, result);
   } catch (err: unknown) {
     result.error = err instanceof Error ? err.message : String(err);
   } finally {
     result.duration_ms = Date.now() - startTime;
-    // Clean up workspace
     await rm(workspace, { recursive: true, force: true }).catch(() => void 0);
   }
 
@@ -583,6 +592,110 @@ export async function runSWEBenchEval(
   }
 
   return report;
+}
+
+export async function runSWEBenchGoldCalibration(
+  instances: SWEInstance[],
+  _projectRoot: string,
+  options: { timeout?: number; useCachedClone?: boolean } = {},
+): Promise<SWECalibrationReport> {
+  const runId = `gold-cal-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}`;
+  const results: SWECalibrationResult[] = [];
+
+  for (const instance of instances) {
+    results.push(await runSWEBenchGoldCalibrationInstance(instance, options));
+  }
+
+  const reproducedBaseline = results.filter((result) => result.baselineReproduced).length;
+  const goldResolved = results.filter((result) => result.goldResolved).length;
+  return {
+    runId,
+    total: results.length,
+    reproducedBaseline,
+    goldResolved,
+    passRate: results.length > 0 ? goldResolved / results.length : 0,
+    results,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+async function runSWEBenchGoldCalibrationInstance(
+  instance: SWEInstance,
+  options: { timeout?: number; useCachedClone?: boolean },
+): Promise<SWECalibrationResult> {
+  const startTime = Date.now();
+  const workspaceBase = join(tmpdir(), "dantecode-swe-bench-calibration");
+  const workspace = join(workspaceBase, instance.instance_id);
+  const result: SWECalibrationResult = {
+    instance_id: instance.instance_id,
+    baselineReproduced: false,
+    goldResolved: false,
+    failureClass: "infra",
+    duration_ms: 0,
+  };
+
+  try {
+    if (!options.useCachedClone) {
+      await rm(workspace, { recursive: true, force: true });
+    }
+    await mkdir(workspace, { recursive: true });
+
+    const setupOk = await setupEnvironment(instance, workspace, options.useCachedClone);
+    if (!setupOk) {
+      result.failureClass = "env_error";
+      result.error = "Environment setup failed";
+      return result;
+    }
+
+    if (instance.test_patch) {
+      const patchOk = await applyPatch(instance.test_patch, workspace);
+      if (!patchOk) {
+        result.failureClass = "test_patch_error";
+        result.error = "Test patch failed to apply";
+        return result;
+      }
+    }
+
+    const failToPass = instance.FAIL_TO_PASS ?? instance.fail_to_pass ?? [];
+    const passToPass = instance.PASS_TO_PASS ?? instance.pass_to_pass ?? [];
+    const baseline = await runTests(failToPass.length > 0 ? failToPass : ["tests/"], workspace);
+    result.baselineOutput = baseline.output;
+    result.baselineReproduced = !baseline.passed;
+    if (!result.baselineReproduced) {
+      result.failureClass = "baseline_not_reproduced";
+      result.error = "Baseline failure was not reproduced";
+      return result;
+    }
+
+    if (!instance.patch?.trim()) {
+      result.failureClass = "infra";
+      result.error = "Gold patch is missing";
+      return result;
+    }
+
+    const goldPatchOk = await applyPatch(instance.patch, workspace);
+    if (!goldPatchOk) {
+      result.failureClass = "test_patch_error";
+      result.error = "Gold patch failed to apply";
+      return result;
+    }
+
+    const specs = [...failToPass, ...passToPass];
+    const verification = await runTests(specs.length > 0 ? specs : ["tests/"], workspace);
+    result.verificationOutput = verification.output;
+    result.goldResolved = verification.passed;
+    result.failureClass = verification.passed ? "resolved" : "infra";
+    if (!verification.passed) result.error = "Gold patch verification failed";
+    return result;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    result.error = message;
+    result.failureClass = /timed out|timeout/i.test(message) ? "timeout" : "infra";
+    return result;
+  } finally {
+    result.duration_ms = Date.now() - startTime;
+    await rm(workspace, { recursive: true, force: true }).catch(() => void 0);
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -948,7 +1061,6 @@ export interface ReproducedTranchEntry {
  */
 export function getReproducedTranche(benchPath: string): ReproducedTranchEntry[] {
   try {
-    const { readFileSync } = require("node:fs") as typeof import("node:fs");
     const raw = readFileSync(benchPath, "utf-8");
     const data = JSON.parse(raw) as { reproduced_tranche?: unknown[] };
     if (!Array.isArray(data.reproduced_tranche)) return [];
@@ -1001,13 +1113,8 @@ export async function verifyPatchApplicability(
   patchContent: string,
   tempBaseDir?: string,
 ): Promise<boolean> {
-  const { spawnSync } = require("node:child_process") as typeof import("node:child_process");
-  const { mkdirSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
-  const os = require("node:os") as typeof import("node:os");
-  const path = require("node:path") as typeof import("node:path");
-
-  const base = tempBaseDir ?? os.tmpdir();
-  const tmpRepo = path.join(base, `dc-patch-verify-${randomUUID()}`);
+  const base = tempBaseDir ?? tmpdir();
+  const tmpRepo = join(base, `dc-patch-verify-${randomUUID()}`);
 
   try {
     mkdirSync(tmpRepo, { recursive: true });
@@ -1029,20 +1136,20 @@ export async function verifyPatchApplicability(
     const seeds = extractPatchFileSeeds(patchContent);
     if (seeds.length > 0) {
       for (const { filePath, content } of seeds) {
-        const fullPath = path.join(tmpRepo, filePath);
-        mkdirSync(path.dirname(fullPath), { recursive: true });
+        const fullPath = join(tmpRepo, filePath);
+        mkdirSync(dirname(fullPath), { recursive: true });
         writeFileSync(fullPath, content, "utf-8");
       }
     } else {
       // Fallback: single placeholder so there's at least one commit
-      writeFileSync(path.join(tmpRepo, "placeholder.txt"), "placeholder\n", "utf-8");
+      writeFileSync(join(tmpRepo, "placeholder.txt"), "placeholder\n", "utf-8");
     }
 
     run("git", ["add", "."]);
     run("git", ["commit", "-m", "init"]);
 
     // Write patch to a file then run git apply --check
-    const patchFile = path.join(tmpRepo, "patch.diff");
+    const patchFile = join(tmpRepo, "patch.diff");
     writeFileSync(patchFile, patchContent, "utf-8");
 
     const result = run("git", ["apply", "--check", patchFile]);
@@ -1051,7 +1158,6 @@ export async function verifyPatchApplicability(
     return false;
   } finally {
     try {
-      const { rmSync } = require("node:fs") as typeof import("node:fs");
       rmSync(tmpRepo, { recursive: true, force: true });
     } catch {
       // ignore cleanup errors
@@ -1082,11 +1188,8 @@ export interface HardTaskSuccessRate {
  * Writes .danteforge/hard-task-success-rate.json.
  */
 export async function computeHardTaskSuccessRate(projectRoot: string): Promise<HardTaskSuccessRate> {
-  const { readFileSync, writeFileSync, existsSync, mkdirSync } = require("node:fs") as typeof import("node:fs");
-  const path = require("node:path") as typeof import("node:path");
-
-  const logPath = path.join(projectRoot, ".danteforge", "task-completion-log.jsonl");
-  const outPath = path.join(projectRoot, ".danteforge", "hard-task-success-rate.json");
+  const logPath = join(projectRoot, ".danteforge", "task-completion-log.jsonl");
+  const outPath = join(projectRoot, ".danteforge", "hard-task-success-rate.json");
 
   let entries: Array<{ verdict: string; toolCallCount: number }> = [];
   try {
@@ -1114,7 +1217,7 @@ export async function computeHardTaskSuccessRate(projectRoot: string): Promise<H
   };
 
   try {
-    const dir = path.join(projectRoot, ".danteforge");
+    const dir = join(projectRoot, ".danteforge");
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(outPath, JSON.stringify(result, null, 2), "utf-8");
   } catch {
@@ -1135,23 +1238,19 @@ export async function runTypeCheckOracle(
 ): Promise<boolean | null> {
   if (touchedFiles.length === 0) return null;
 
-  const { spawnSync } = require("node:child_process") as typeof import("node:child_process");
-  const { existsSync } = require("node:fs") as typeof import("node:fs");
-  const path = require("node:path") as typeof import("node:path");
-
   // Find nearest package.json walking up from first touched file
   const findPackageDir = (filePath: string): string => {
-    let dir = path.dirname(filePath);
+    let dir = dirname(filePath);
     let iterations = 0;
-    while (dir !== path.dirname(dir) && iterations < 10) {
-      if (existsSync(path.join(dir, "package.json"))) return dir;
-      dir = path.dirname(dir);
+    while (dir !== dirname(dir) && iterations < 10) {
+      if (existsSync(join(dir, "package.json"))) return dir;
+      dir = dirname(dir);
       iterations++;
     }
     return projectRoot;
   };
 
-  const packageDir = findPackageDir(path.resolve(projectRoot, touchedFiles[0]!));
+  const packageDir = findPackageDir(resolve(projectRoot, touchedFiles[0]!));
 
   try {
     const result = spawnSync("npx", ["tsc", "--noEmit"], {

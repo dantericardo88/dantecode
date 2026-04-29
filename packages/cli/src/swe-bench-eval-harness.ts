@@ -11,7 +11,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 
 const execFileAsync = promisify(execFile);
 
@@ -98,17 +98,47 @@ function splitCmd(cmd: string): string[] {
  *
  * Network errors produce cloneSucceeded=false without throwing.
  */
+/** Run a step on the eval workdir and stamp the matching `success` flag on
+ *  `result`. Returns true when the step passed. */
+async function runEvalStep(
+  result: SWEBenchEvalResult,
+  flagName: "cloneSucceeded" | "checkoutSucceeded" | "patchApplicable",
+  errorPrefix: string,
+  fn: () => Promise<void>,
+): Promise<boolean> {
+  try {
+    await fn();
+    result[flagName] = true;
+    return true;
+  } catch (e: unknown) {
+    result.errorReason = `${errorPrefix}: ${(e as Error).message ?? String(e)}`;
+    return false;
+  }
+}
+
+async function runEvalTestCommand(workDir: string, testCmd: string, timeoutSecs: number | undefined, result: SWEBenchEvalResult): Promise<void> {
+  const timeoutMs = (timeoutSecs ?? 60) * 1000;
+  const argv = splitCmd(testCmd);
+  const exe = argv[0]!;
+  const args = argv.slice(1);
+  try {
+    const r = await execFileAsync(exe, args, { cwd: workDir, timeout: timeoutMs });
+    result.testsPassed = true;
+    result.testOutput = (r.stdout ?? "").slice(0, 2000);
+  } catch (e: unknown) {
+    result.testsPassed = false;
+    const err = e as { stdout?: string; stderr?: string };
+    result.testOutput = ((err.stdout ?? "") + (err.stderr ?? "")).slice(0, 2000);
+  }
+}
+
 export async function evalSWEBenchInstance(
   instance: SWEBenchInstance,
   workBaseDir?: string,
 ): Promise<SWEBenchEvalResult> {
   const start = Date.now();
-  const workDir = join(
-    workBaseDir ?? tmpdir(),
-    `swe-eval-${instance.instanceId}-${Date.now()}`,
-  );
-
-  const base: SWEBenchEvalResult = {
+  const workDir = join(workBaseDir ?? tmpdir(), `swe-eval-${instance.instanceId}-${Date.now()}`);
+  const result: SWEBenchEvalResult = {
     instanceId: instance.instanceId,
     cloneSucceeded: false,
     checkoutSucceeded: false,
@@ -120,74 +150,35 @@ export async function evalSWEBenchInstance(
   try {
     await mkdir(workDir, { recursive: true });
 
-    // Step 1: Shallow clone
-    try {
-      await execFileAsync(
-        "git",
-        ["clone", "--depth", "50", instance.repoUrl, workDir],
-        { timeout: 120_000 },
-      );
-      base.cloneSucceeded = true;
-    } catch (e: unknown) {
-      base.errorReason = `clone failed: ${(e as Error).message ?? String(e)}`;
-      base.durationMs = Date.now() - start;
-      return base;
-    }
+    if (!await runEvalStep(result, "cloneSucceeded", "clone failed", async () => {
+      await execFileAsync("git", ["clone", "--depth", "50", instance.repoUrl, workDir], { timeout: 120_000 });
+    })) return finalize(result, start);
 
-    // Step 2: Checkout exact commit
-    try {
-      await execFileAsync("git", ["checkout", instance.baseCommit], {
-        cwd: workDir,
-        timeout: 30_000,
-      });
-      base.checkoutSucceeded = true;
-    } catch (e: unknown) {
-      base.errorReason = `checkout failed: ${(e as Error).message ?? String(e)}`;
-      base.durationMs = Date.now() - start;
-      return base;
-    }
+    if (!await runEvalStep(result, "checkoutSucceeded", "checkout failed", async () => {
+      await execFileAsync("git", ["checkout", instance.baseCommit], { cwd: workDir, timeout: 30_000 });
+    })) return finalize(result, start);
 
-    // Step 3: Write patch file and apply
     const patchPath = join(workDir, "_eval.patch");
     await writeFile(patchPath, instance.patch, "utf-8");
-    try {
-      await execFileAsync("git", ["apply", patchPath], {
-        cwd: workDir,
-        timeout: 30_000,
-      });
-      base.patchApplicable = true;
-    } catch (e: unknown) {
-      base.errorReason = `patch failed: ${(e as Error).message ?? String(e)}`;
-      base.durationMs = Date.now() - start;
-      return base;
-    }
+    if (!await runEvalStep(result, "patchApplicable", "patch failed", async () => {
+      await execFileAsync("git", ["apply", patchPath], { cwd: workDir, timeout: 30_000 });
+    })) return finalize(result, start);
 
-    // Step 4: Optionally run tests
     if (instance.testCmd) {
-      const timeoutMs = (instance.testTimeoutSecs ?? 60) * 1000;
-      const argv = splitCmd(instance.testCmd);
-      const exe = argv[0]!;
-      const args = argv.slice(1);
-      try {
-        const r = await execFileAsync(exe, args, { cwd: workDir, timeout: timeoutMs });
-        base.testsPassed = true;
-        base.testOutput = (r.stdout ?? "").slice(0, 2000);
-      } catch (e: unknown) {
-        base.testsPassed = false;
-        const err = e as { stdout?: string; stderr?: string };
-        base.testOutput = ((err.stdout ?? "") + (err.stderr ?? "")).slice(0, 2000);
-      }
+      await runEvalTestCommand(workDir, instance.testCmd, instance.testTimeoutSecs, result);
     }
-
-    base.durationMs = Date.now() - start;
-    return base;
   } catch (e: unknown) {
-    base.errorReason = `unexpected: ${(e as Error).message ?? String(e)}`;
-    base.durationMs = Date.now() - start;
-    return base;
+    result.errorReason = `unexpected: ${(e as Error).message ?? String(e)}`;
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => void 0);
   }
+
+  return finalize(result, start);
+}
+
+function finalize(result: SWEBenchEvalResult, start: number): SWEBenchEvalResult {
+  result.durationMs = Date.now() - start;
+  return result;
 }
 
 // ----------------------------------------------------------------------------
@@ -214,7 +205,7 @@ export function recordSWEBenchEval(log: SWEBenchEvalLog, projectRoot?: string): 
 export function loadSWEBenchEvalLog(projectRoot?: string): SWEBenchEvalLog[] {
   const logPath = resolveLogPath(projectRoot);
   try {
-    const raw = require("node:fs").readFileSync(logPath, "utf-8") as string;
+    const raw = readFileSync(logPath, "utf-8");
     return raw
       .split("\n")
       .map((line: string) => line.trim())
