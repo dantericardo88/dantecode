@@ -958,6 +958,44 @@ async function regenerateFromFailure(
   }
 }
 
+function emitIterationProgress(
+  onProgress: ((state: BladeProgressState) => void) | undefined,
+  iteration: number,
+  maxIterations: number,
+  pdseScore: number,
+  task: string,
+  silentMode: boolean | undefined,
+  whichEnd: "start" | "end",
+): void {
+  onProgress?.({
+    phase: iteration,
+    totalPhases: maxIterations,
+    percentComplete: Math.floor(((whichEnd === "start" ? iteration - 1 : iteration) / maxIterations) * 100),
+    pdseScore,
+    estimatedCostUsd: 0,
+    currentTask: task,
+    silentMode: silentMode ?? false,
+  });
+}
+
+async function recordAutoforgeSuccess(
+  context: AutoforgeContext,
+  projectRoot: string,
+): Promise<void> {
+  await recordSuccessPattern(
+    {
+      pattern: `Autoforge success: ${context.taskDescription}`,
+      correction: `Preserve the implementation shape that passed ${context.filePath ?? "the target file"}.`,
+      filePattern: context.filePath,
+      language: context.language,
+      framework: context.framework,
+      occurrences: 1,
+      lastSeen: new Date().toISOString(),
+    },
+    projectRoot,
+  );
+}
+
 export async function runAutoforgeIAL(
   code: string,
   context: AutoforgeContext,
@@ -977,15 +1015,8 @@ export async function runAutoforgeIAL(
   const iterationHistory: AutoforgeIteration[] = [];
 
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
-    onProgress?.({
-      phase: iteration,
-      totalPhases: maxIterations,
-      percentComplete: Math.floor(((iteration - 1) / maxIterations) * 100),
-      pdseScore: finalScore?.overall ?? 0,
-      estimatedCostUsd: 0,
-      currentTask: `Running iteration ${iteration}/${maxIterations}`,
-      silentMode: bladeConfig.silentMode ?? false,
-    });
+    emitIterationProgress(onProgress, iteration, maxIterations, finalScore?.overall ?? 0,
+      `Running iteration ${iteration}/${maxIterations}`, bladeConfig.silentMode, "start");
 
     const iterationStartedAt = Date.now();
     const { inputViolations, criticalAbort } = collectInputViolations(currentCode, context, config, projectRoot);
@@ -1003,12 +1034,8 @@ export async function runAutoforgeIAL(
         durationMs: Date.now() - iterationStartedAt,
       });
       return {
-        finalCode: currentCode,
-        iterations: iteration,
-        succeeded: false,
-        iterationHistory,
-        finalScore,
-        totalDurationMs: Date.now() - startedAt,
+        finalCode: currentCode, iterations: iteration, succeeded: false,
+        iterationHistory, finalScore, totalDurationMs: Date.now() - startedAt,
         terminationReason: "constitution_violation",
       };
     }
@@ -1028,57 +1055,27 @@ export async function runAutoforgeIAL(
       durationMs: Date.now() - iterationStartedAt,
     });
 
-    onProgress?.({
-      phase: iteration,
-      totalPhases: maxIterations,
-      percentComplete: Math.floor((iteration / maxIterations) * 100),
-      pdseScore: score.overall,
-      estimatedCostUsd: 0,
-      currentTask: succeeded
-        ? `Iteration ${iteration} passed`
-        : `Iteration ${iteration} needs fixes`,
-      silentMode: bladeConfig.silentMode ?? false,
-    });
+    emitIterationProgress(onProgress, iteration, maxIterations, score.overall,
+      succeeded ? `Iteration ${iteration} passed` : `Iteration ${iteration} needs fixes`,
+      bladeConfig.silentMode, "end");
 
     if (succeeded) {
-      await recordSuccessPattern(
-        {
-          pattern: `Autoforge success: ${context.taskDescription}`,
-          correction: `Preserve the implementation shape that passed ${context.filePath ?? "the target file"}.`,
-          filePattern: context.filePath,
-          language: context.language,
-          framework: context.framework,
-          occurrences: 1,
-          lastSeen: new Date().toISOString(),
-        },
-        projectRoot,
-      );
-
+      await recordAutoforgeSuccess(context, projectRoot);
       return {
-        finalCode: currentCode,
-        iterations: iteration,
-        succeeded: true,
-        iterationHistory,
-        finalScore,
-        totalDurationMs: Date.now() - startedAt,
+        finalCode: currentCode, iterations: iteration, succeeded: true,
+        iterationHistory, finalScore, totalDurationMs: Date.now() - startedAt,
         terminationReason: "passed",
       };
     }
 
-    if (iteration === maxIterations) {
-      break;
-    }
+    if (iteration === maxIterations) break;
 
     currentCode = await regenerateFromFailure(currentCode, score, gstackResults, context, bladeConfig, projectRoot, router);
   }
 
   return {
-    finalCode: currentCode,
-    iterations: iterationHistory.length,
-    succeeded: false,
-    iterationHistory,
-    finalScore,
-    totalDurationMs: Date.now() - startedAt,
+    finalCode: currentCode, iterations: iterationHistory.length, succeeded: false,
+    iterationHistory, finalScore, totalDurationMs: Date.now() - startedAt,
     terminationReason: "max_iterations",
   };
 }
