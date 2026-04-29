@@ -202,45 +202,45 @@ async function handleGitHubWebhook(
  * `eventRegistry.verifySlackSignature()`, parses the payload,
  * creates an AgentTask via `eventRegistry.fromSlack()`, and enqueues it.
  */
+/** Verify the Slack v0 signature on the raw body. Sends a 4xx/5xx and returns
+ *  null on any failure; otherwise returns the validated `timestamp` header. */
+function verifySlackEnvelope(
+  req: IncomingMessage,
+  res: ServerResponse,
+  rawBody: string,
+  config: WebhookServerConfig,
+): string | null {
+  const signatureHeader = req.headers["x-slack-signature"];
+  const timestamp = req.headers["x-slack-request-timestamp"];
+
+  if (typeof signatureHeader !== "string" || !signatureHeader) {
+    sendJSON(res, 401, { error: "Missing X-Slack-Signature header" });
+    return null;
+  }
+  if (typeof timestamp !== "string" || !timestamp) {
+    sendJSON(res, 401, { error: "Missing X-Slack-Request-Timestamp header" });
+    return null;
+  }
+  if (!config.slackSigningSecret) {
+    sendJSON(res, 500, { error: "Slack signing secret not configured" });
+    return null;
+  }
+  if (!config.eventRegistry.verifySlackSignature(rawBody, timestamp, signatureHeader, config.slackSigningSecret)) {
+    sendJSON(res, 401, { error: "Invalid Slack signature" });
+    return null;
+  }
+  return timestamp;
+}
+
 async function handleSlackWebhook(
   req: IncomingMessage,
   res: ServerResponse,
   config: WebhookServerConfig,
 ): Promise<void> {
   const rawBody = await readBody(req);
+  const timestamp = verifySlackEnvelope(req, res, rawBody, config);
+  if (timestamp === null) return;
 
-  // Signature verification
-  const signatureHeader = req.headers["x-slack-signature"];
-  const timestamp = req.headers["x-slack-request-timestamp"];
-
-  if (typeof signatureHeader !== "string" || !signatureHeader) {
-    sendJSON(res, 401, { error: "Missing X-Slack-Signature header" });
-    return;
-  }
-
-  if (typeof timestamp !== "string" || !timestamp) {
-    sendJSON(res, 401, { error: "Missing X-Slack-Request-Timestamp header" });
-    return;
-  }
-
-  if (!config.slackSigningSecret) {
-    sendJSON(res, 500, { error: "Slack signing secret not configured" });
-    return;
-  }
-
-  if (
-    !config.eventRegistry.verifySlackSignature(
-      rawBody,
-      timestamp,
-      signatureHeader,
-      config.slackSigningSecret,
-    )
-  ) {
-    sendJSON(res, 401, { error: "Invalid Slack signature" });
-    return;
-  }
-
-  // Parse the JSON payload
   let payload: Record<string, unknown>;
   try {
     payload = JSON.parse(rawBody) as Record<string, unknown>;
@@ -249,13 +249,11 @@ async function handleSlackWebhook(
     return;
   }
 
-  // Slack URL verification challenge
   if (payload.type === "url_verification") {
     sendJSON(res, 200, { challenge: payload.challenge });
     return;
   }
 
-  // Extract the Slack event data
   const event = payload.event as Record<string, unknown> | undefined;
   if (!event) {
     sendJSON(res, 400, { error: "Missing event payload" });
@@ -268,14 +266,12 @@ async function handleSlackWebhook(
     user: (event.user as string) ?? "",
     timestamp: (event.ts as string) ?? timestamp,
   });
-
   if (!task) {
     sendJSON(res, 200, { accepted: false, reason: "Slack event not actionable" });
     return;
   }
 
   const taskId = config.backgroundRunner.enqueue(task.prompt);
-
   appendAuditEvent(config.projectRoot, {
     sessionId: task.id,
     timestamp: new Date().toISOString(),
@@ -283,16 +279,9 @@ async function handleSlackWebhook(
     payload: { source: "slack", event: "message", taskId, agentTaskId: task.id },
     modelId: "",
     projectRoot: config.projectRoot,
-  }).catch(() => {
-    /* non-fatal */
-  });
+  }).catch(() => { /* non-fatal */ });
 
-  sendJSON(res, 200, {
-    accepted: true,
-    taskId,
-    agentTaskId: task.id,
-    source: task.source,
-  });
+  sendJSON(res, 200, { accepted: true, taskId, agentTaskId: task.id, source: task.source });
 }
 
 /**
