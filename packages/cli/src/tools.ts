@@ -388,44 +388,23 @@ export async function toolWrite(
 /**
  * Edit tool: performs exact string replacement within a file.
  */
-export async function toolEdit(
+/** Validate Edit args + enforce read-before-edit. Returns blocking
+ * ToolResult or { resolved, oldString, newString, replaceAll } on success. */
+function validateEditArgs(
   input: Record<string, unknown>,
   projectRoot: string,
-  context?: CliToolExecutionContext,
-): Promise<ToolResult> {
+  context: CliToolExecutionContext | undefined,
+): ToolResult | { resolved: string; oldString: string; newString: string; replaceAll: boolean } {
   const filePath = input["file_path"] as string | undefined;
   const oldString = input["old_string"] as string | undefined;
   const newString = input["new_string"] as string | undefined;
   const replaceAll = input["replace_all"] === true;
-
-  if (!filePath) {
-    return {
-      toolName: "Edit",
-      content: "Error: file_path parameter is required",
-      isError: true,
-      ok: false,
-    };
-  }
-  if (oldString === undefined) {
-    return {
-      toolName: "Edit",
-      content: "Error: old_string parameter is required",
-      isError: true,
-      ok: false,
-    };
-  }
-  if (newString === undefined) {
-    return {
-      toolName: "Edit",
-      content: "Error: new_string parameter is required",
-      isError: true,
-      ok: false,
-    };
+  const missing = !filePath ? "file_path" : oldString === undefined ? "old_string" : newString === undefined ? "new_string" : null;
+  if (missing) {
+    return { toolName: "Edit", content: `Error: ${missing} parameter is required`, isError: true, ok: false };
   }
 
-  const resolved = resolvePath(filePath, projectRoot);
-  // Check if the file has been read via readTracker OR has a tracked snapshot
-  // Normalize path for cross-platform (trackedSnapshots may use POSIX paths in tests)
+  const resolved = resolvePath(filePath!, projectRoot);
   const normalizedResolved = normalizeSnapshotKey(resolved);
   const hasBeenRead =
     context?.readTracker?.has(buildReadTrackerKey(context, resolved)) ||
@@ -442,6 +421,73 @@ export async function toolEdit(
       ok: false,
     };
   }
+  return { resolved, oldString: oldString!, newString: newString!, replaceAll };
+}
+
+/** Format the no-match error with progressive guidance:
+ * 1st failure: append current file contents.
+ * 2nd failure: nudge toward full rewrite via Write. */
+function formatNoMatchError(resolved: string, existing: string, attemptCount: number): ToolResult {
+  const baseMsg = `Error: old_string not found in ${resolved}. The string to replace must exist exactly in the file.`;
+  const tail = attemptCount === 0
+    ? `\n\nLatest file contents:\n${existing}`
+    : `\n\nUse Write with the full updated file contents instead of Edit.`;
+  return {
+    toolName: "Edit",
+    content: baseMsg + tail,
+    isError: true,
+    ok: false,
+    reasonCode: "no-match",
+    changedFiles: [],
+    mutationRecords: [],
+  };
+}
+
+/** Build ChangedFileRecord + MutationRecord for a successful Edit. */
+function buildEditRecords(
+  resolved: string,
+  projectRoot: string,
+  updatedContent: string,
+  beforeSnapshot: { hash: string; id: string },
+  afterHash: string,
+  replacementCount: number,
+): { changedFile: ChangedFileRecord; mutationRecord: MutationRecord } {
+  const diffSummary = `${replacementCount} replacement${replacementCount !== 1 ? "s" : ""}`;
+  const path = relative(projectRoot, resolved).replace(/\\/g, "/");
+  const lineCount = updatedContent.split(/\r?\n/).length;
+  const changedFile: ChangedFileRecord = {
+    path,
+    beforeHash: beforeSnapshot.hash,
+    afterHash,
+    lineCount,
+    additions: 0,
+    deletions: 0,
+    diffSummary,
+  };
+  const mutationRecord: MutationRecord = {
+    id: `mutation-${Date.now()}`,
+    toolCallId: "",
+    path,
+    beforeHash: beforeSnapshot.hash,
+    afterHash,
+    diffSummary,
+    lineCount,
+    additions: 0,
+    deletions: 0,
+    timestamp: new Date().toISOString(),
+    readSnapshotId: beforeSnapshot.id,
+  };
+  return { changedFile, mutationRecord };
+}
+
+export async function toolEdit(
+  input: Record<string, unknown>,
+  projectRoot: string,
+  context?: CliToolExecutionContext,
+): Promise<ToolResult> {
+  const argsOrError = validateEditArgs(input, projectRoot, context);
+  if ("toolName" in argsOrError) return argsOrError;
+  const { resolved, oldString, newString, replaceAll } = argsOrError;
 
   try {
     const attemptKey = buildEditAttemptKey(context, resolved, oldString, newString);
@@ -472,38 +518,10 @@ export async function toolEdit(
     }
 
     const editResult = applyExactEdit(existing, oldString, newString, replaceAll);
-
     if (!editResult.matched || !editResult.updatedContent) {
-      // Increment attempt count for progressive guidance
-      if (context?.editAttempts) {
-        context.editAttempts.set(attemptKey, attemptCount + 1);
-      }
-      const baseMsg = `Error: old_string not found in ${resolved}. The string to replace must exist exactly in the file.`;
-      if (attemptCount === 0) {
-        // First failure: append current file contents (already read) to help the model
-        return {
-          toolName: "Edit",
-          content: `${baseMsg}\n\nLatest file contents:\n${existing}`,
-          isError: true,
-          ok: false,
-          reasonCode: "no-match",
-          changedFiles: [],
-          mutationRecords: [],
-        };
-      }
-      // Second failure: nudge towards full rewrite
-      return {
-        toolName: "Edit",
-        content: `${baseMsg}\n\nUse Write with the full updated file contents instead of Edit.`,
-        isError: true,
-        ok: false,
-        reasonCode: "no-match",
-        changedFiles: [],
-        mutationRecords: [],
-      };
+      if (context?.editAttempts) context.editAttempts.set(attemptKey, attemptCount + 1);
+      return formatNoMatchError(resolved, existing, attemptCount);
     }
-
-    // Check for uniqueness if not replaceAll
     if (!replaceAll && editResult.occurrenceCount > 1) {
       return {
         toolName: "Edit",
@@ -515,23 +533,12 @@ export async function toolEdit(
     }
 
     await writeFile(resolved, editResult.updatedContent, "utf-8");
-    setTrackedSnapshot(
-      context,
-      resolved,
-      await buildTrackedSnapshot(resolved, editResult.updatedContent),
-    );
+    setTrackedSnapshot(context, resolved, await buildTrackedSnapshot(resolved, editResult.updatedContent));
     context?.editAttempts?.delete(attemptKey);
 
-    // Create snapshots for linkage
     const beforeSnapshot = await createFileSnapshot(resolved, existing);
     const afterSnapshot = await createFileSnapshot(resolved, editResult.updatedContent);
-
-    // Compute hashes and diff
-    const beforeHash = beforeSnapshot.hash;
-    const afterHash = afterSnapshot.hash;
-
-    // Fail closed on no observable mutation
-    if (beforeHash === afterHash) {
+    if (beforeSnapshot.hash === afterSnapshot.hash) {
       return {
         toolName: "Edit",
         content: `No observable mutation: file content unchanged after edit operation.`,
@@ -543,36 +550,13 @@ export async function toolEdit(
       };
     }
 
-    const diffSummary = `${editResult.replacementCount} replacement${editResult.replacementCount !== 1 ? "s" : ""}`;
-
-    const changedFile: ChangedFileRecord = {
-      path: relative(projectRoot, resolved).replace(/\\/g, "/"),
-      beforeHash,
-      afterHash,
-      lineCount: editResult.updatedContent.split(/\r?\n/).length,
-      additions: 0, // Approximate, could compute properly
-      deletions: 0,
-      diffSummary,
-    };
-
-    const mutationRecord: MutationRecord = {
-      id: `mutation-${Date.now()}`,
-      toolCallId: "", // Will be set by caller
-      path: changedFile.path,
-      beforeHash,
-      afterHash,
-      diffSummary,
-      lineCount: changedFile.lineCount,
-      additions: 0,
-      deletions: 0,
-      timestamp: new Date().toISOString(),
-      readSnapshotId: beforeSnapshot.id,
-    };
-
+    const { changedFile, mutationRecord } = buildEditRecords(
+      resolved, projectRoot, editResult.updatedContent,
+      beforeSnapshot, afterSnapshot.hash, editResult.replacementCount,
+    );
     return {
       toolName: "Edit",
-      content:
-        `Successfully edited ${resolved} (${editResult.replacementCount} replacement${editResult.replacementCount !== 1 ? "s" : ""})` +
+      content: `Successfully edited ${resolved} (${editResult.replacementCount} replacement${editResult.replacementCount !== 1 ? "s" : ""})` +
         (editResult.usedNormalizedLineEndings ? " [normalized line endings]" : ""),
       isError: false,
       ok: true,
@@ -581,12 +565,7 @@ export async function toolEdit(
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return {
-      toolName: "Edit",
-      content: `Error editing file: ${message}`,
-      isError: true,
-      ok: false,
-    };
+    return { toolName: "Edit", content: `Error editing file: ${message}`, isError: true, ok: false };
   }
 }
 

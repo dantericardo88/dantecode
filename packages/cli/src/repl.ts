@@ -112,6 +112,103 @@ function syncAgentLoopConfig(replState: ReplState, agentConfig: AgentLoopConfig)
  * 6. Routes natural language to the agent loop
  * 7. Handles Ctrl+C gracefully
  */
+/** Print the startup banner + sandbox status + MCP status (suppressed in silent mode). */
+async function displayReplStartupStatus(
+  options: ReplOptions,
+  state: DanteCodeState,
+  mcpClientManager: MCPClientManager,
+  toolCount: number,
+): Promise<void> {
+  if (!options.silent) {
+    process.stdout.write(getBanner(state.model.default, options.projectRoot));
+  }
+  if (options.enableSandbox && !options.silent) {
+    const bridge = new SandboxBridge(options.projectRoot, false);
+    const dockerAvailable = await bridge.isAvailable();
+    const sandboxMode = dockerAvailable ? "Docker container" : "local (audit-logged)";
+    process.stdout.write(`${DIM}[sandbox: ${sandboxMode}]${RESET}\n`);
+  } else if (!options.enableSandbox && !options.silent) {
+    process.stdout.write(`${DIM}[sandbox: disabled — run without --no-sandbox to enable]${RESET}\n`);
+  }
+  if (!options.silent && toolCount > 0) {
+    const serverCount = mcpClientManager.getConnectedServers().length;
+    process.stdout.write(
+      `${DIM}[mcp: ${serverCount} server${serverCount !== 1 ? "s" : ""}, ` +
+        `${toolCount} tool${toolCount !== 1 ? "s" : ""}]${RESET}\n`,
+    );
+  }
+}
+
+/** Two-press Ctrl+C: first press aborts in-flight generation, second exits.
+ * Returns a small ref object that the caller can update to reset the counter. */
+function wireCtrlCHandler(rl: readline.Interface, replState: ReplState): { count: number } {
+  const ref = { count: 0 };
+  rl.on("SIGINT", () => {
+    if (replState.activeAbortController) {
+      replState.activeAbortController.abort();
+      replState.activeAbortController = null;
+      process.stdout.write(`\n${DIM}(generation aborted)${RESET}\n`);
+      ref.count = 0;
+      return;
+    }
+    ref.count++;
+    if (ref.count >= 2) {
+      process.stdout.write(`\n${DIM}Goodbye!${RESET}\n`);
+      process.exit(0);
+    }
+    process.stdout.write(`\n${DIM}Press Ctrl+C again to exit, or type /clear to reset.${RESET}\n`);
+    rl.prompt();
+  });
+  return ref;
+}
+
+/** Wire the readline `line` handler with multi-line buffer support
+ * (triple-quote / triple-backtick fences). */
+function wireReplLineHandler(
+  rl: readline.Interface,
+  replState: ReplState,
+  agentConfig: AgentLoopConfig,
+): void {
+  let multiLineBuffer: string[] | null = null;
+  rl.on("line", async (rawLine: string) => {
+    const line = rawLine.trimEnd();
+    if (multiLineBuffer !== null) {
+      if (line === '"""' || line === "```") {
+        const fullInput = multiLineBuffer.join("\n");
+        multiLineBuffer = null;
+        if (fullInput.trim().length > 0) {
+          await processInput(fullInput, replState, agentConfig, rl);
+        } else {
+          rl.prompt();
+        }
+      } else {
+        multiLineBuffer.push(line);
+      }
+      return;
+    }
+    if (line === '"""' || line === "```") {
+      multiLineBuffer = [];
+      process.stdout.write(`${DIM}(multi-line mode, end with ${line})${RESET}\n`);
+      return;
+    }
+    if (line.trim().length === 0) {
+      rl.prompt();
+      return;
+    }
+    await processInput(line, replState, agentConfig, rl);
+  });
+}
+
+/** Shut down sandbox + MCP on readline close, then exit cleanly. */
+function wireReplCloseHandler(rl: readline.Interface, replState: ReplState): void {
+  rl.on("close", async () => {
+    if (replState.sandboxBridge) await replState.sandboxBridge.shutdown();
+    if (replState.mcpClient) await replState.mcpClient.disconnectAll();
+    process.stdout.write(`\n${DIM}Session ended. Goodbye!${RESET}\n`);
+    process.exit(0);
+  });
+}
+
 export async function startRepl(options: ReplOptions): Promise<void> {
   // Load or initialize state
   let state: DanteCodeState;
@@ -140,30 +237,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   await mcpClientManager.connectAll(mcpConfig);
   const connectedTools = mcpClientManager.listTools();
 
-  // Display banner (suppressed in silent mode)
-  if (!options.silent) {
-    const banner = getBanner(state.model.default, options.projectRoot);
-    process.stdout.write(banner);
-  }
-
-  // Show sandbox status so security posture is always visible
-  if (options.enableSandbox && !options.silent) {
-    const bridge = new SandboxBridge(options.projectRoot, false);
-    const dockerAvailable = await bridge.isAvailable();
-    const sandboxMode = dockerAvailable ? "Docker container" : "local (audit-logged)";
-    process.stdout.write(`${DIM}[sandbox: ${sandboxMode}]${RESET}\n`);
-  } else if (!options.enableSandbox && !options.silent) {
-    process.stdout.write(`${DIM}[sandbox: disabled — run without --no-sandbox to enable]${RESET}\n`);
-  }
-
-  // Show MCP connection status
-  if (!options.silent && connectedTools.length > 0) {
-    const serverCount = mcpClientManager.getConnectedServers().length;
-    process.stdout.write(
-      `${DIM}[mcp: ${serverCount} server${serverCount !== 1 ? "s" : ""}, ` +
-      `${connectedTools.length} tool${connectedTools.length !== 1 ? "s" : ""}]${RESET}\n`,
-    );
-  }
+  await displayReplStartupStatus(options, state, mcpClientManager, connectedTools.length);
 
   const permissions = state.permissions || {
     edit: "ask",
@@ -228,83 +302,12 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   }
   replState.mcpClient = mcpClientManager;
 
-  // Handle Ctrl+C gracefully — first press aborts streaming, second exits
-  let ctrlCCount = 0;
-  rl.on("SIGINT", () => {
-    // If a generation is in progress, abort it first
-    if (replState.activeAbortController) {
-      replState.activeAbortController.abort();
-      replState.activeAbortController = null;
-      process.stdout.write(`\n${DIM}(generation aborted)${RESET}\n`);
-      ctrlCCount = 0;
-      return;
-    }
-    ctrlCCount++;
-    if (ctrlCCount >= 2) {
-      process.stdout.write(`\n${DIM}Goodbye!${RESET}\n`);
-      process.exit(0);
-    }
-    process.stdout.write(`\n${DIM}Press Ctrl+C again to exit, or type /clear to reset.${RESET}\n`);
-    rl.prompt();
-  });
-
-  // Multi-line input support: track whether we are collecting multi-line input
-  let multiLineBuffer: string[] | null = null;
+  const ctrlCRef = wireCtrlCHandler(rl, replState);
+  void ctrlCRef;
+  wireReplLineHandler(rl, replState, agentConfig);
+  wireReplCloseHandler(rl, replState);
 
   rl.prompt();
-
-  rl.on("line", async (rawLine: string) => {
-    // Reset Ctrl+C counter on any input
-    ctrlCCount = 0;
-
-    const line = rawLine.trimEnd();
-
-    // Multi-line mode: start with """ or ``` and end with the same
-    if (multiLineBuffer !== null) {
-      if (line === '"""' || line === "```") {
-        // End of multi-line input
-        const fullInput = multiLineBuffer.join("\n");
-        multiLineBuffer = null;
-
-        if (fullInput.trim().length > 0) {
-          await processInput(fullInput, replState, agentConfig, rl);
-        } else {
-          rl.prompt();
-        }
-      } else {
-        multiLineBuffer.push(line);
-      }
-      return;
-    }
-
-    // Start multi-line input
-    if (line === '"""' || line === "```") {
-      multiLineBuffer = [];
-      process.stdout.write(`${DIM}(multi-line mode, end with ${line})${RESET}\n`);
-      return;
-    }
-
-    // Skip empty lines
-    if (line.trim().length === 0) {
-      rl.prompt();
-      return;
-    }
-
-    await processInput(line, replState, agentConfig, rl);
-  });
-
-  rl.on("close", async () => {
-    // Shut down sandbox container if running
-    if (replState.sandboxBridge) {
-      await replState.sandboxBridge.shutdown();
-    }
-    // Disconnect all MCP servers
-    if (replState.mcpClient) {
-      await replState.mcpClient.disconnectAll();
-    }
-    process.stdout.write(`\n${DIM}Session ended. Goodbye!${RESET}\n`);
-    process.exit(0);
-  });
 }
 
 /**
