@@ -345,23 +345,56 @@ export async function* parseSSEStream(
 
 // ─── Cloud Dispatch ──────────────────────────────────────────────────────────
 
+function cloudResult(
+  startedAt: number,
+  partial: Omit<DispatchResult, "mode" | "durationMs">,
+): DispatchResult {
+  return { mode: "cloud", durationMs: Date.now() - startedAt, ...partial };
+}
+
+/** Drain an SSE stream coming back from the cloud agent. Calls onProgress for
+ *  every progress frame and returns the final result fields when the
+ *  `complete` event arrives (or the stream ends without one). */
+async function consumeCloudSseStream(
+  body: NonNullable<Response["body"]>,
+  onProgress?: DispatchOptions["onProgress"],
+): Promise<{ output: string; touchedFiles: string[]; error?: string; success: boolean }> {
+  let output = "";
+  let touchedFiles: string[] = [];
+  let error: string | undefined;
+  let success = false;
+
+  for await (const event of parseSSEStream(body)) {
+    try {
+      const parsed = JSON.parse(event.data);
+      if (event.event === "progress" || parsed.type === "progress") {
+        onProgress?.(parsed.message ?? parsed.data ?? "Processing...");
+      } else if (event.event === "complete" || parsed.type === "complete" || parsed.status) {
+        const r = parsed as CloudAgentResponse;
+        output = r.output ?? "";
+        touchedFiles = r.touchedFiles ?? [];
+        error = r.error;
+        success = r.status === "completed";
+      }
+    } catch {
+      if (event.data && event.data !== "[DONE]") onProgress?.(event.data);
+    }
+  }
+  return { output, touchedFiles, error, success };
+}
+
 async function dispatchCloud(options: DispatchOptions): Promise<DispatchResult> {
   const startedAt = Date.now();
 
   if (!options.cloudConfig) {
-    return {
-      mode: "cloud",
-      success: false,
-      output: "",
-      touchedFiles: [],
-      durationMs: Date.now() - startedAt,
+    return cloudResult(startedAt, {
+      success: false, output: "", touchedFiles: [],
       error: "No cloud configuration provided",
-    };
+    });
   }
 
   const { endpoint, apiToken, timeoutMs: cloudTimeout, streamProgress } = options.cloudConfig;
   const timeout = options.timeoutMs ?? cloudTimeout ?? 600_000;
-
   options.onProgress?.("Dispatching task to cloud agent...");
 
   const controller = new AbortController();
@@ -372,10 +405,7 @@ async function dispatchCloud(options: DispatchOptions): Promise<DispatchResult> 
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiToken}`,
     };
-
-    if (streamProgress) {
-      headers["Accept"] = "text/event-stream";
-    }
+    if (streamProgress) headers["Accept"] = "text/event-stream";
 
     const response = await fetch(`${endpoint}/tasks`, {
       method: "POST",
@@ -390,88 +420,36 @@ async function dispatchCloud(options: DispatchOptions): Promise<DispatchResult> 
 
     if (!response.ok) {
       const errorBody = await response.text().catch(() => "Unknown error");
-      return {
-        mode: "cloud",
-        success: false,
-        output: "",
-        touchedFiles: [],
-        durationMs: Date.now() - startedAt,
+      return cloudResult(startedAt, {
+        success: false, output: "", touchedFiles: [],
         error: `Cloud API returned ${response.status}: ${errorBody}`,
-      };
+      });
     }
 
-    // Handle SSE streaming response
     if (streamProgress && response.body) {
-      let finalOutput = "";
-      let finalTouchedFiles: string[] = [];
-      let finalError: string | undefined;
-      let finalSuccess = false;
-
-      for await (const event of parseSSEStream(response.body)) {
-        try {
-          const parsed = JSON.parse(event.data);
-
-          if (event.event === "progress" || parsed.type === "progress") {
-            options.onProgress?.(parsed.message ?? parsed.data ?? "Processing...");
-          } else if (event.event === "complete" || parsed.type === "complete" || parsed.status) {
-            const result = parsed as CloudAgentResponse;
-            finalOutput = result.output ?? "";
-            finalTouchedFiles = result.touchedFiles ?? [];
-            finalError = result.error;
-            finalSuccess = result.status === "completed";
-          }
-        } catch {
-          // Non-JSON SSE data treated as progress text
-          if (event.data && event.data !== "[DONE]") {
-            options.onProgress?.(event.data);
-          }
-        }
-      }
-
-      return {
-        mode: "cloud",
-        success: finalSuccess,
-        output: finalOutput,
-        touchedFiles: finalTouchedFiles,
-        durationMs: Date.now() - startedAt,
-        error: finalError,
-      };
+      const r = await consumeCloudSseStream(response.body, options.onProgress);
+      return cloudResult(startedAt, {
+        success: r.success, output: r.output, touchedFiles: r.touchedFiles, error: r.error,
+      });
     }
 
-    // Handle standard JSON response
     const responseData = (await response.json()) as CloudAgentResponse;
     options.onProgress?.("Cloud execution completed.");
-
-    return {
-      mode: "cloud",
+    return cloudResult(startedAt, {
       success: responseData.status === "completed",
       output: responseData.output ?? "",
       touchedFiles: responseData.touchedFiles ?? [],
-      durationMs: Date.now() - startedAt,
       error: responseData.error,
-    };
+    });
   } catch (err: unknown) {
-    const durationMs = Date.now() - startedAt;
-
     if (err instanceof DOMException && err.name === "AbortError") {
-      return {
-        mode: "cloud",
-        success: false,
-        output: "",
-        touchedFiles: [],
-        durationMs,
-        error: "Cloud request timed out",
-      };
+      return cloudResult(startedAt, {
+        success: false, output: "", touchedFiles: [], error: "Cloud request timed out",
+      });
     }
-
-    return {
-      mode: "cloud",
-      success: false,
-      output: "",
-      touchedFiles: [],
-      durationMs,
-      error: errorMessage(err),
-    };
+    return cloudResult(startedAt, {
+      success: false, output: "", touchedFiles: [], error: errorMessage(err),
+    });
   } finally {
     clearTimeout(timeoutHandle);
   }
