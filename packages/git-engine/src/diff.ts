@@ -257,21 +257,22 @@ export function generateColoredHunk(
 /**
  * Computes a unified diff between two line arrays with context lines.
  */
-function computeUnifiedDiff(
-  oldLines: string[],
-  newLines: string[],
-  contextSize: number,
-): DiffLine[] {
-  // Simple O(NM) LCS for moderate-size files
+interface EditOp {
+  type: "equal" | "remove" | "add";
+  oldIdx: number;
+  newIdx: number;
+  line: string;
+}
+
+interface HunkRegion {
+  start: number;
+  end: number;
+}
+
+/** Standard O(NM) LCS table over oldLines/newLines. */
+function buildLcsTable(oldLines: string[], newLines: string[]): number[][] {
   const n = oldLines.length;
   const m = newLines.length;
-
-  // For very large files, fall back to a simpler line-by-line comparison
-  if (n * m > 10_000_000) {
-    return simpleDiff(oldLines, newLines);
-  }
-
-  // Build LCS table
   const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
   for (let i = 1; i <= n; i++) {
     for (let j = 1; j <= m; j++) {
@@ -282,22 +283,22 @@ function computeUnifiedDiff(
       }
     }
   }
+  return dp;
+}
 
-  // Backtrack to produce edit script
-  interface EditOp {
-    type: "equal" | "remove" | "add";
-    oldIdx: number;
-    newIdx: number;
-    line: string;
-  }
+/** Reverse-walk the LCS table into a forward-ordered edit script. */
+function backtrackToEdits(
+  dp: number[][],
+  oldLines: string[],
+  newLines: string[],
+): EditOp[] {
   const edits: EditOp[] = [];
-  let i = n;
-  let j = m;
+  let i = oldLines.length;
+  let j = newLines.length;
   while (i > 0 || j > 0) {
     if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
       edits.push({ type: "equal", oldIdx: i, newIdx: j, line: oldLines[i - 1]! });
-      i--;
-      j--;
+      i--; j--;
     } else if (j > 0 && (i === 0 || dp[i]![j - 1]! >= dp[i - 1]![j]!)) {
       edits.push({ type: "add", oldIdx: -1, newIdx: j, line: newLines[j - 1]! });
       j--;
@@ -307,18 +308,18 @@ function computeUnifiedDiff(
     }
   }
   edits.reverse();
+  return edits;
+}
 
-  // Group edits into hunks with context
-  const result: DiffLine[] = [];
+/** Coalesce change indices into [start,end] regions, padded by contextSize. */
+function groupEditsToRegions(edits: EditOp[], contextSize: number): HunkRegion[] {
   const changes: number[] = [];
   for (let idx = 0; idx < edits.length; idx++) {
     if (edits[idx]!.type !== "equal") changes.push(idx);
   }
-
   if (changes.length === 0) return [];
 
-  // Merge change regions with context
-  const regions: Array<{ start: number; end: number }> = [];
+  const regions: HunkRegion[] = [];
   let regionStart = Math.max(0, changes[0]! - contextSize);
   let regionEnd = Math.min(edits.length - 1, changes[0]! + contextSize);
 
@@ -334,22 +335,20 @@ function computeUnifiedDiff(
     }
   }
   regions.push({ start: regionStart, end: regionEnd });
+  return regions;
+}
 
-  // Emit hunks
+function emitDiffLines(edits: EditOp[], regions: HunkRegion[]): DiffLine[] {
+  const result: DiffLine[] = [];
   for (const region of regions) {
-    // Compute hunk header line numbers
     const firstEdit = edits[region.start]!;
     const oldStart =
       firstEdit.type === "add"
-        ? firstEdit.oldIdx === -1
-          ? 1
-          : firstEdit.oldIdx
+        ? (firstEdit.oldIdx === -1 ? 1 : firstEdit.oldIdx)
         : firstEdit.oldIdx;
     const newStart =
       firstEdit.type === "remove"
-        ? firstEdit.newIdx === -1
-          ? 1
-          : firstEdit.newIdx
+        ? (firstEdit.newIdx === -1 ? 1 : firstEdit.newIdx)
         : firstEdit.newIdx;
     result.push({
       type: "hunk_header",
@@ -357,34 +356,34 @@ function computeUnifiedDiff(
       oldLineNo: null,
       newLineNo: null,
     });
-
     for (let idx = region.start; idx <= region.end; idx++) {
       const edit = edits[idx]!;
-      switch (edit.type) {
-        case "equal":
-          result.push({
-            type: "context",
-            content: edit.line,
-            oldLineNo: edit.oldIdx,
-            newLineNo: edit.newIdx,
-          });
-          break;
-        case "add":
-          result.push({ type: "add", content: edit.line, oldLineNo: null, newLineNo: edit.newIdx });
-          break;
-        case "remove":
-          result.push({
-            type: "remove",
-            content: edit.line,
-            oldLineNo: edit.oldIdx,
-            newLineNo: null,
-          });
-          break;
+      if (edit.type === "equal") {
+        result.push({ type: "context", content: edit.line, oldLineNo: edit.oldIdx, newLineNo: edit.newIdx });
+      } else if (edit.type === "add") {
+        result.push({ type: "add", content: edit.line, oldLineNo: null, newLineNo: edit.newIdx });
+      } else {
+        result.push({ type: "remove", content: edit.line, oldLineNo: edit.oldIdx, newLineNo: null });
       }
     }
   }
-
   return result;
+}
+
+function computeUnifiedDiff(
+  oldLines: string[],
+  newLines: string[],
+  contextSize: number,
+): DiffLine[] {
+  const n = oldLines.length;
+  const m = newLines.length;
+  if (n * m > 10_000_000) return simpleDiff(oldLines, newLines);
+
+  const dp = buildLcsTable(oldLines, newLines);
+  const edits = backtrackToEdits(dp, oldLines, newLines);
+  const regions = groupEditsToRegions(edits, contextSize);
+  if (regions.length === 0) return [];
+  return emitDiffLines(edits, regions);
 }
 
 /**

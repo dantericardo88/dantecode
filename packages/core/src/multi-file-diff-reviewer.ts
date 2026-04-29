@@ -86,63 +86,115 @@ function nextHunkId(): string {
   return `fdh-${Date.now()}-${++_hunkCounter}`;
 }
 
+interface DiffParseState {
+  files: FileDiff[];
+  currentFile: FileDiff | null;
+  currentHunk: FileDiffHunk | null;
+  oldLineNo: number;
+  newLineNo: number;
+  renameFrom: string | null;
+  renameTo: string | null;
+  isNewFile: boolean;
+  isDeletedFile: boolean;
+}
+
+function newDiffParseState(): DiffParseState {
+  return {
+    files: [], currentFile: null, currentHunk: null,
+    oldLineNo: 0, newLineNo: 0,
+    renameFrom: null, renameTo: null,
+    isNewFile: false, isDeletedFile: false,
+  };
+}
+
+function finalizeHunk(state: DiffParseState): void {
+  if (state.currentHunk && state.currentFile) {
+    state.currentFile.hunks.push(state.currentHunk);
+    state.currentHunk = null;
+  }
+}
+
+function finalizeFile(state: DiffParseState): void {
+  finalizeHunk(state);
+  const f = state.currentFile;
+  if (!f) return;
+
+  f.additions = f.hunks.reduce((s, h) => s + h.lines.filter((l) => l.type === "add").length, 0);
+  f.deletions = f.hunks.reduce((s, h) => s + h.lines.filter((l) => l.type === "remove").length, 0);
+  f.netChange = f.additions - f.deletions;
+  if (state.renameFrom && state.renameTo) {
+    f.status = "renamed";
+    f.oldPath = state.renameFrom;
+    f.newPath = state.renameTo;
+  } else if (state.isNewFile) {
+    f.status = "added";
+  } else if (state.isDeletedFile) {
+    f.status = "removed";
+  }
+  state.files.push(f);
+  state.currentFile = null;
+  state.renameFrom = null;
+  state.renameTo = null;
+  state.isNewFile = false;
+  state.isDeletedFile = false;
+}
+
+/** True when the line was consumed as file metadata (rename/binary/mode). */
+function consumeFileMetadata(line: string, state: DiffParseState): boolean {
+  if (!state.currentFile) return false;
+  if (BINARY_RE.test(line)) { state.currentFile.isBinary = true; return true; }
+  if (NEW_FILE_MODE_RE.test(line)) { state.isNewFile = true; return true; }
+  if (DELETED_FILE_MODE_RE.test(line)) { state.isDeletedFile = true; return true; }
+  const rf = line.match(RENAME_FROM_RE);
+  if (rf) { state.renameFrom = rf[1]!; return true; }
+  const rt = line.match(RENAME_TO_RE);
+  if (rt) { state.renameTo = rt[1]!; return true; }
+  if (OLD_FILE_RE.test(line) || NEW_FILE_RE.test(line)) return true;
+  return false;
+}
+
+function startNewHunk(line: string, hunkMatch: RegExpMatchArray, state: DiffParseState): void {
+  finalizeHunk(state);
+  state.oldLineNo = parseInt(hunkMatch[1]!, 10);
+  const oldCount = hunkMatch[2] !== undefined ? parseInt(hunkMatch[2]!, 10) : 1;
+  state.newLineNo = parseInt(hunkMatch[3]!, 10);
+  const newCount = hunkMatch[4] !== undefined ? parseInt(hunkMatch[4]!, 10) : 1;
+  state.currentHunk = {
+    id: nextHunkId(),
+    header: line,
+    oldStart: state.oldLineNo,
+    oldCount,
+    newStart: state.newLineNo,
+    newCount,
+    lines: [],
+  };
+}
+
+function appendDiffBodyLine(line: string, state: DiffParseState): void {
+  if (!state.currentHunk) return;
+  if (line.startsWith("+")) {
+    state.currentHunk.lines.push({ type: "add", content: line.slice(1), newLineNo: state.newLineNo++ });
+  } else if (line.startsWith("-")) {
+    state.currentHunk.lines.push({ type: "remove", content: line.slice(1), oldLineNo: state.oldLineNo++ });
+  } else if (line.startsWith(" ")) {
+    state.currentHunk.lines.push({
+      type: "context", content: line.slice(1),
+      oldLineNo: state.oldLineNo++, newLineNo: state.newLineNo++,
+    });
+  }
+}
+
 /**
  * Parse a unified diff string (e.g. from `git diff`) into structured FileDiff objects.
  */
 export function parseMultiFileDiff(rawDiff: string): FileDiff[] {
-  const lines = rawDiff.split("\n");
-  const files: FileDiff[] = [];
+  const state = newDiffParseState();
 
-  let currentFile: FileDiff | null = null;
-  let currentHunk: FileDiffHunk | null = null;
-  let oldLineNo = 0;
-  let newLineNo = 0;
-  let renameFrom: string | null = null;
-  let renameTo: string | null = null;
-  let isNewFile = false;
-  let isDeletedFile = false;
-
-  function finalizeHunk() {
-    if (currentHunk && currentFile) {
-      currentFile.hunks.push(currentHunk);
-      currentHunk = null;
-    }
-  }
-
-  function finalizeFile() {
-    finalizeHunk();
-    if (currentFile) {
-      currentFile.additions = currentFile.hunks.reduce(
-        (s, h) => s + h.lines.filter((l) => l.type === "add").length, 0,
-      );
-      currentFile.deletions = currentFile.hunks.reduce(
-        (s, h) => s + h.lines.filter((l) => l.type === "remove").length, 0,
-      );
-      currentFile.netChange = currentFile.additions - currentFile.deletions;
-      if (renameFrom && renameTo) {
-        currentFile.status = "renamed";
-        currentFile.oldPath = renameFrom;
-        currentFile.newPath = renameTo;
-      } else if (isNewFile) {
-        currentFile.status = "added";
-      } else if (isDeletedFile) {
-        currentFile.status = "removed";
-      }
-      files.push(currentFile);
-      currentFile = null;
-      renameFrom = null;
-      renameTo = null;
-      isNewFile = false;
-      isDeletedFile = false;
-    }
-  }
-
-  for (const line of lines) {
-    // New file header
+  for (const line of rawDiff.split("\n")) {
     const diffMatch = line.match(DIFF_HEADER_RE);
     if (diffMatch) {
-      finalizeFile();
-      currentFile = {
+      finalizeFile(state);
+      state.currentFile = {
         oldPath: diffMatch[1]!,
         newPath: diffMatch[2]!,
         status: "modified",
@@ -154,57 +206,20 @@ export function parseMultiFileDiff(rawDiff: string): FileDiff[] {
       };
       continue;
     }
+    if (!state.currentFile) continue;
 
-    if (!currentFile) continue;
+    if (consumeFileMetadata(line, state)) continue;
 
-    if (BINARY_RE.test(line)) { currentFile.isBinary = true; continue; }
-    if (NEW_FILE_MODE_RE.test(line)) { isNewFile = true; continue; }
-    if (DELETED_FILE_MODE_RE.test(line)) { isDeletedFile = true; continue; }
-
-    const renameFromMatch = line.match(RENAME_FROM_RE);
-    if (renameFromMatch) { renameFrom = renameFromMatch[1]!; continue; }
-
-    const renameToMatch = line.match(RENAME_TO_RE);
-    if (renameToMatch) { renameTo = renameToMatch[1]!; continue; }
-
-    // Skip file headers (--- / +++) — info is already in diff header
-    if (OLD_FILE_RE.test(line) || NEW_FILE_RE.test(line)) continue;
-
-    // Hunk header
     const hunkMatch = line.match(HUNK_HEADER_RE);
     if (hunkMatch) {
-      finalizeHunk();
-      oldLineNo = parseInt(hunkMatch[1]!, 10);
-      const oldCount = hunkMatch[2] !== undefined ? parseInt(hunkMatch[2]!, 10) : 1;
-      newLineNo = parseInt(hunkMatch[3]!, 10);
-      const newCount = hunkMatch[4] !== undefined ? parseInt(hunkMatch[4]!, 10) : 1;
-      currentHunk = {
-        id: nextHunkId(),
-        header: line,
-        oldStart: oldLineNo,
-        oldCount,
-        newStart: newLineNo,
-        newCount,
-        lines: [],
-      };
+      startNewHunk(line, hunkMatch, state);
       continue;
     }
-
-    if (!currentHunk) continue;
-
-    // Diff lines
-    if (line.startsWith("+")) {
-      currentHunk.lines.push({ type: "add", content: line.slice(1), newLineNo: newLineNo++ });
-    } else if (line.startsWith("-")) {
-      currentHunk.lines.push({ type: "remove", content: line.slice(1), oldLineNo: oldLineNo++ });
-    } else if (line.startsWith(" ")) {
-      currentHunk.lines.push({ type: "context", content: line.slice(1), oldLineNo: oldLineNo++, newLineNo: newLineNo++ });
-    }
-    // Lines starting with \ (no newline at EOF) are silently skipped
+    appendDiffBodyLine(line, state);
   }
 
-  finalizeFile();
-  return files;
+  finalizeFile(state);
+  return state.files;
 }
 
 // ─── Summary Generator ────────────────────────────────────────────────────────
