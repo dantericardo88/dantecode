@@ -309,6 +309,22 @@ describe("regression guard — ascend orchestrator wiring", () => {
     }
   });
 
+  it("SubmitPatch tool wired into agent-tools (SWE-agent ACI harvest)", () => {
+    // SWE-agent's ACI primitive — agent signals "this is my final patch."
+    // Fights two top SWE-bench failure modes: empty-patch (no_patch:7) and
+    // patch-context fabrication (compile_error:4) by surfacing the working
+    // diff and pre-validating Python syntax. If this regresses, the SWE-bench
+    // dim 5 sprint loses its primary lever.
+    const tools = read("agent-tools.ts");
+    expect(tools).toContain("\"SubmitPatch\"");
+    expect(tools).toMatch(/case\s+["']SubmitPatch["']\s*:/);
+    expect(tools).toMatch(/async function toolSubmitPatch/);
+    expect(tools).toMatch(/git diff HEAD --no-color/);
+    expect(tools).toMatch(/no changes detected/);
+    expect(tools).toMatch(/python -m py_compile/);
+    expect(tools).toMatch(/KNOWN_TOOL_NAMES[\s\S]{0,400}SubmitPatch/);
+  });
+
   it("ReplaceInFile tool wired into agent-tools (Cline harvest)", () => {
     // Cline's `replace_in_file` pattern: model emits SEARCH/REPLACE diff blocks,
     // runtime applies via 4-strategy fuzzy fallback. Dramatically reduces

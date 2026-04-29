@@ -539,6 +539,98 @@ async function toolBash(input: Record<string, unknown>, projectRoot: string): Pr
   }
 }
 
+/**
+ * SWE-agent ACI primitive — agent signals "this is my final patch."
+ *
+ * Fights two of the top SWE-bench failure modes:
+ *   - empty patch (no_patch:7) → returns error "no changes detected" so the
+ *     agent must actually edit something before claiming completion.
+ *   - patch-context fabrication (compile_error:4) → optionally runs
+ *     `python -m py_compile` on each modified .py file and surfaces syntax
+ *     errors before the harness validates the diff.
+ *
+ * In bench mode the harness extracts the diff via `git diff HEAD` after the
+ * agent finishes. SubmitPatch lets the agent self-inspect that diff first —
+ * a key SWE-agent technique for reducing fabrication.
+ */
+async function toolSubmitPatch(
+  input: Record<string, unknown>,
+  projectRoot: string,
+): Promise<ToolResult> {
+  const validateSyntax = input["validate_syntax"] !== false;
+  try {
+    const diffResult = execSync("git diff HEAD --no-color", {
+      cwd: projectRoot,
+      encoding: "utf-8",
+      timeout: 30000,
+      maxBuffer: 5 * 1024 * 1024,
+      stdio: ["pipe", "pipe", "pipe"],
+      shell: resolvePreferredShell(),
+    });
+    const diff = (diffResult ?? "").toString();
+
+    if (!diff.trim()) {
+      return {
+        content:
+          "SubmitPatch: no changes detected in working tree. The agent has not modified any files yet — edit at least one file before submitting.",
+        isError: true,
+      };
+    }
+
+    // Validate Python syntax on modified .py files. Cheap pre-flight that
+    // catches the compile_error bucket before the bench harness does.
+    if (validateSyntax) {
+      const modifiedPyFiles = Array.from(
+        diff.matchAll(/^diff --git a\/(.+\.py) b\/.+$/gm),
+      ).map((m) => m[1]).filter((f): f is string => Boolean(f));
+
+      const syntaxErrors: string[] = [];
+      for (const relPath of modifiedPyFiles) {
+        try {
+          execSync(`python -m py_compile "${relPath}"`, {
+            cwd: projectRoot,
+            timeout: 10000,
+            stdio: ["pipe", "pipe", "pipe"],
+            shell: resolvePreferredShell(),
+          });
+        } catch (err: unknown) {
+          const stderr = (err as { stderr?: Buffer | string }).stderr;
+          const msg = stderr ? stderr.toString().trim() : "syntax check failed";
+          syntaxErrors.push(`  ${relPath}: ${msg.split("\n")[0]}`);
+        }
+      }
+
+      if (syntaxErrors.length > 0) {
+        return {
+          content: [
+            "SubmitPatch: syntax errors in modified files — fix these before resubmitting:",
+            ...syntaxErrors,
+            "",
+            "Diff so far:",
+            diff.slice(0, 4000),
+          ].join("\n"),
+          isError: true,
+        };
+      }
+    }
+
+    const lineCount = diff.split("\n").length;
+    const fileCount = (diff.match(/^diff --git /gm) ?? []).length;
+    return {
+      content: [
+        `SubmitPatch: ${fileCount} file(s) modified, ${lineCount} diff lines.`,
+        "",
+        "Final diff (truncated to 8000 chars if longer):",
+        diff.slice(0, 8000),
+      ].join("\n"),
+      isError: false,
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { content: `SubmitPatch error: ${message}`, isError: true };
+  }
+}
+
 async function toolGlob(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
   const pattern = input["pattern"] as string | undefined;
   if (!pattern) return { content: "Error: pattern parameter is required", isError: true };
@@ -974,6 +1066,9 @@ export async function executeTool(
     case "Bash":
       result = await toolBash(input, projectRoot);
       break;
+    case "SubmitPatch":
+      result = await toolSubmitPatch(input, projectRoot);
+      break;
     case "Glob":
       result = await toolGlob(input, projectRoot);
       break;
@@ -1250,6 +1345,7 @@ export function findToolUseSpans(text: string): Array<{ start: number; end: numb
 const KNOWN_TOOL_NAMES = new Set([
   "Read", "Write", "Edit", "ReplaceInFile", "ListDir", "Bash", "Glob", "Grep",
   "GitCommit", "GitPush", "SelfUpdate", "WebSearch", "WebFetch", "SubAgent",
+  "SubmitPatch",
 ]);
 
 export function extractToolCalls(text: string): {
@@ -1355,11 +1451,23 @@ Format: <tool_use>{"name": "ToolName", "input": {...}}</tool_use>
 ### Edit — Replace a string in a file
   Input: { "file_path": "path/to/file", "old_string": "text to find", "new_string": "replacement" }
 
+### ReplaceInFile — Apply a SEARCH/REPLACE diff (Cline-style fuzzy match)
+  Prefer this over Edit when the change is multi-line or the surrounding
+  context might have whitespace drift. The 4-strategy matcher tolerates
+  minor token-level differences in context lines.
+  Input: { "file_path": "path/to/file", "diff": "<<<<<<< SEARCH\\nfind text\\n=======\\nreplacement text\\n>>>>>>> REPLACE" }
+
 ### ListDir — List directory contents
   Input: { "path": "path/to/dir" }
 
 ### Bash — Execute a shell command
   Input: { "command": "npm test", "timeout": 30000 }
+
+### SubmitPatch — Mark this set of edits as the final patch (SWE-bench mode)
+  Runs git diff HEAD on the working tree, refuses empty diffs, validates
+  Python syntax on modified .py files. Use after you believe the bug is
+  fixed — gives you a chance to self-inspect the diff before tests run.
+  Input: { "validate_syntax": true }
 
 ### Glob — Find files matching a glob pattern
   Input: { "pattern": "**/*.ts", "path": "src/" }
