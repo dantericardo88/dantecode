@@ -309,6 +309,23 @@ describe("regression guard — ascend orchestrator wiring", () => {
     }
   });
 
+  it("SWE-bench harness pre-executes failing tests to prime the agent (OpenHands CodeAct)", () => {
+    // OpenHands CodeAct pattern — running the FAIL_TO_PASS tests once
+    // before the agent edits. The stack trace becomes priming context so
+    // the agent doesn't have to discover the failure through exploration.
+    // Targets the test_assertion bucket (model produces wrong fix because
+    // it never saw the real error). If this regresses, every cycle wastes
+    // budget rediscovering bugs.
+    const runner = readFileSync(
+      join(REPO_ROOT, "packages", "cli", "src", "swe-bench-runner.ts"),
+      "utf-8",
+    );
+    expect(runner).toMatch(/Pre-execute the failing tests/);
+    expect(runner).toMatch(/runTests\(failToPassEarly/);
+    expect(runner).toMatch(/failingTestsPriming/);
+    expect(runner).toMatch(/Failing tests output \(pre-execution/);
+  });
+
   it("SubmitPatch tool wired into agent-tools (SWE-agent ACI harvest)", () => {
     // SWE-agent's ACI primitive — agent signals "this is my final patch."
     // Fights two top SWE-bench failure modes: empty-patch (no_patch:7) and

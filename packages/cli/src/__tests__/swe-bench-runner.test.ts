@@ -281,12 +281,15 @@ describe("swe-bench-runner", () => {
       });
       await runSWEBenchInstance(instance, "/project");
 
-      const pytestCall = capturedArgs.find((a) => a.includes("pytest"));
-      expect(pytestCall).toBeDefined();
-      if (pytestCall) {
-        expect(pytestCall.some((a) => a.includes("test_a"))).toBe(true);
-        expect(pytestCall.some((a) => a.includes("test_b"))).toBe(true);
-      }
+      // After Phase 4 (CodeAct priming), the runner makes TWO pytest calls:
+      // (1) pre-execute on FAIL_TO_PASS only, (2) final verify on
+      // FAIL_TO_PASS + PASS_TO_PASS. The verify call (the last one) is the
+      // one we assert covers both spec lists.
+      const pytestCalls = capturedArgs.filter((a) => a.includes("pytest"));
+      expect(pytestCalls.length).toBeGreaterThanOrEqual(1);
+      const verifyCall = pytestCalls[pytestCalls.length - 1]!;
+      expect(verifyCall.some((a) => a.includes("test_a"))).toBe(true);
+      expect(verifyCall.some((a) => a.includes("test_b"))).toBe(true);
     });
 
     it("supports legacy lowercase fail_to_pass field", async () => {

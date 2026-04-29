@@ -289,12 +289,21 @@ async function runDanteCode(
   workspace: string,
   model: string,
   timeoutMs: number,
+  failingTestsPriming?: string,
 ): Promise<boolean> {
   const dantecodebin = process.env["DANTECODE_BIN"] ?? "dantecode";
 
   let prompt = problemStatement;
   if (hints) {
     prompt += `\n\nHints:\n${hints}`;
+  }
+  // OpenHands CodeAct pattern: pre-execute the failing tests once and feed
+  // the stack trace to the agent as priming context. The agent doesn't have
+  // to discover the failure through exploration — it can target the fix
+  // immediately. Reduces test_assertion failures (model produces wrong fix
+  // because it never saw the real error).
+  if (failingTestsPriming && failingTestsPriming.trim()) {
+    prompt += `\n\nFailing tests output (pre-execution, before any edit):\n<pre>${failingTestsPriming.slice(0, 3000)}</pre>\nUse this stack trace to locate the bug, then ship the fix. After editing, call SubmitPatch to self-inspect your diff.`;
   }
 
   await run(
@@ -361,6 +370,20 @@ export async function runSWEBenchInstance(
       }
     }
 
+    // Step 2.5: Pre-execute the failing tests to prime the agent (CodeAct).
+    // Cap at 60s — pre-exec is supposed to fail fast; if it hangs that's
+    // an env issue, not a stack-trace source we want.
+    const failToPassEarly = instance.FAIL_TO_PASS ?? instance.fail_to_pass ?? [];
+    let priming = "";
+    if (failToPassEarly.length > 0) {
+      try {
+        const pre = await runTests(failToPassEarly, workspace);
+        if (!pre.passed) priming = pre.output;
+      } catch {
+        // Pre-execute failure is non-fatal — agent continues without priming.
+      }
+    }
+
     // Step 3: Run DanteCode agent
     await runDanteCode(
       instance.problem_statement,
@@ -368,6 +391,7 @@ export async function runSWEBenchInstance(
       workspace,
       model,
       timeoutMs,
+      priming,
     );
 
     // Step 4: Capture the agent's patch
