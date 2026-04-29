@@ -2321,6 +2321,23 @@ export {
 } from "./resilience.js";
 export type { RetryOptions } from "./resilience.js";
 
+// Input validation primitives — boundary-point sanitization (paths, URLs,
+// shell args, HTML). Returns discriminated unions; throwing variants
+// integrate with ValidationError from errors.ts.
+export {
+  validateRelativePath,
+  assertValidRelativePath,
+  validateHttpUrl,
+  assertValidHttpUrl,
+  validateProvider,
+  containsShellMeta,
+  validateShellArg,
+  escapeHtml,
+  validateBoundedString,
+  parseJsonBounded,
+} from "./input-validation.js";
+export type { ValidationResult } from "./input-validation.js";
+
 // Sprint Dim 30 — UX trust / explainability
 export {
   labelConfidence,

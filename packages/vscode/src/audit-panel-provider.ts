@@ -754,14 +754,24 @@ export class AuditPanelProvider implements vscode.WebviewViewProvider {
 
             var sessionRow = document.createElement('div');
             sessionRow.className = 'event-meta-row';
-            sessionRow.innerHTML = '<span class="event-meta-key">Session:</span><span>' +
-              escapeHtml(evt.sessionId.substring(0, 16)) + '...</span>';
+            var sessionKey = document.createElement('span');
+            sessionKey.className = 'event-meta-key';
+            sessionKey.textContent = 'Session:';
+            var sessionVal = document.createElement('span');
+            sessionVal.textContent = evt.sessionId.substring(0, 16) + '...';
+            sessionRow.appendChild(sessionKey);
+            sessionRow.appendChild(sessionVal);
             meta.appendChild(sessionRow);
 
             var modelRow = document.createElement('div');
             modelRow.className = 'event-meta-row';
-            modelRow.innerHTML = '<span class="event-meta-key">Model:</span><span>' +
-              escapeHtml(evt.modelId) + '</span>';
+            var modelKey = document.createElement('span');
+            modelKey.className = 'event-meta-key';
+            modelKey.textContent = 'Model:';
+            var modelVal = document.createElement('span');
+            modelVal.textContent = evt.modelId;
+            modelRow.appendChild(modelKey);
+            modelRow.appendChild(modelVal);
             meta.appendChild(modelRow);
 
             item.appendChild(meta);

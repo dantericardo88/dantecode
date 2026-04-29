@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { parsePlan, formatPlanForDisplay, PlanActController, PlanActPhase, ExecutionPlan } from './plan-act-controller.js';
+import { parsePlan, formatPlanForDisplay, PlanActController } from './plan-act-controller.js';
+import type { ExecutionPlan } from './plan-act-controller.js';
 
 describe('plan-act-controller', () => {
   describe('parsePlan', () => {
@@ -64,7 +65,10 @@ describe('plan-act-controller', () => {
     });
 
     it('filters short/invalid steps', () => {
-      const input = '1. foo\n2. bar\n3. ';
+      // Parser drops descriptions under 5 chars + empty lines. "foo"/"bar"
+      // are too short; "3. " is empty after the prefix is stripped. Only
+      // the two longer steps survive.
+      const input = '1. read configuration file\n2. write output to disk\n3. \n4. x\n5. hi';
       const plan = parsePlan(input, 'goal');
       expect(plan.steps).toHaveLength(2);
     });
@@ -86,26 +90,29 @@ describe('plan-act-controller', () => {
       const output = formatPlanForDisplay(plan);
       expect(output).toContain('🟢');
       expect(output).toContain('🟡');
-      expect(output).toContain('Files: ~1');
+      expect(output).toContain('**Files:** ~1');
     });
   });
 
   describe('PlanActController', () => {
     it('transitions phases correctly', () => {
-      const controller = new PlanActController({ autoApproveThreshold: 0 });
-      expect(controller.phase).toBe(PlanActPhase.planning);
+      // PlanActPhase is a string-union type, not an enum — compare to
+      // string literals directly. alwaysRequireApproval forces the
+      // awaiting_approval phase even for empty plans.
+      const controller = new PlanActController({ autoApproveThreshold: 0, alwaysRequireApproval: true });
+      expect(controller.phase).toBe('planning');
 
       controller.setPlan({ id: 'p1', goal: 'g', steps: [], estimatedChangedFiles: 0, hasDestructiveSteps: false, createdAt: '' });
-      expect(controller.phase).toBe(PlanActPhase.awaiting_approval);
+      expect(controller.phase).toBe('awaiting_approval');
 
-      controller.approve();
-      expect(controller.phase).toBe(PlanActPhase.executing);
+      controller.processApproval('yes');
+      expect(controller.phase).toBe('executing');
     });
 
     it('auto-approves low-risk plans', () => {
       const controller = new PlanActController({ autoApproveThreshold: 5 });
       controller.setPlan({ id: 'p1', goal: 'g', steps: [], estimatedChangedFiles: 2, hasDestructiveSteps: false, createdAt: '' });
-      expect(controller.phase).toBe(PlanActPhase.executing); // auto-approved
+      expect(controller.phase).toBe('executing'); // auto-approved
     });
   });
 });

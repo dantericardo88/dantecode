@@ -283,10 +283,30 @@ describe("regression guard — ascend orchestrator wiring", () => {
     // and reports "no movement" — even though the overall score went 6.2 → 6.5.
     // FIX: parseOverallScore + graduation detection (newGap === undefined &&
     // newDims.length > 0) + overall-score-moved fallback.
+    // (Logic now lives in ascend-orchestrator.ts after 2026-04-28 extraction.)
     expect(orch).toMatch(/export function parseOverallScore/);
-    expect(provider).toMatch(/parseOverallScore\s*\(/);
-    expect(provider).toMatch(/graduated/);
-    expect(provider).toMatch(/overallMoved|overallDelta/);
+    expect(orch).toMatch(/parseOverallScore\s*\(/);
+    expect(orch).toMatch(/graduated/);
+    expect(orch).toMatch(/overallMoved|overallDelta/);
+  });
+
+  it("runAscendLoop is a thin shim delegating to runAscendLoopCore in orchestrator", () => {
+    // SYMPTOM IF BROKEN: someone re-inlined the 320-line ascend loop body back
+    // into sidebar-provider.ts. Maintainability score stops moving; future
+    // changes to the loop have to navigate a 5,000+ line monolith.
+    // FIX: provider's runAscendLoop is a callback-wiring shim (~25 lines);
+    // orchestrator owns the loop logic via runAscendLoopCore.
+    expect(orch).toMatch(/export\s+async\s+function\s+runAscendLoopCore\s*\(/);
+    expect(orch).toMatch(/AscendLoopCallbacks/);
+    expect(provider).toMatch(/runAscendLoopCore\s*\(\s*args/);
+    // Provider's runAscendLoop method is now small — fewer than 40 lines from
+    // signature to closing brace. If someone re-inlines, this fails.
+    const match = provider.match(/private\s+async\s+runAscendLoop[\s\S]*?\n  \}/);
+    expect(match).not.toBeNull();
+    if (match) {
+      const lineCount = match[0].split("\n").length;
+      expect(lineCount).toBeLessThan(40);
+    }
   });
 
   it("ReplaceInFile tool wired into agent-tools (Cline harvest)", () => {
@@ -310,9 +330,41 @@ describe("regression guard — ascend orchestrator wiring", () => {
     // Result: tiny coverage deltas, score doesn't move.
     // FIX: findLargestUntestedFile picks the biggest source file with NO test,
     // and buildGoalPrompt scopes the cycle to writing tests for THAT specific file.
+    // (After 2026-04-28 extraction the call site lives in orchestrator's runAscendLoopCore.)
     expect(orch).toMatch(/export function findLargestUntestedFile/);
     expect(orch).toMatch(/buildGoalPrompt[\s\S]{0,300}targetFile\?:/);
-    expect(provider).toMatch(/findLargestUntestedFile\s*\(\s*projectRoot\s*\)/);
+    expect(orch).toMatch(/findLargestUntestedFile\s*\(\s*projectRoot\s*\)/);
+  });
+
+  it("input-validation primitives exist and are exported from core", () => {
+    // SYMPTOM IF BROKEN: harsh-scorer drops security 9.5 → 7.0 because the
+    // checkInfraFile('input-validation.ts') evidence flag flips off. Worse,
+    // any code path that takes user-supplied paths/URLs/shell args loses its
+    // boundary-point sanitization (path traversal, SSRF, command injection).
+    const ivPath = join(REPO_ROOT, "packages", "core", "src", "input-validation.ts");
+    expect(existsSync(ivPath)).toBe(true);
+    const iv = readFileSync(ivPath, "utf-8");
+    expect(iv).toMatch(/export function validateRelativePath/);
+    expect(iv).toMatch(/export function validateHttpUrl/);
+    expect(iv).toMatch(/export function validateShellArg/);
+    expect(iv).toMatch(/export function escapeHtml/);
+    // Index re-export so consumers can `import { validateHttpUrl } from "@dantecode/core"`.
+    const coreIndex = readFileSync(join(REPO_ROOT, "packages", "core", "src", "index.ts"), "utf-8");
+    expect(coreIndex).toMatch(/from\s+["']\.\/input-validation\.js["']/);
+  });
+
+  it("audit-panel-provider does not innerHTML-interpolate user data", () => {
+    // SYMPTOM IF BROKEN: an XSS sink reappears at lines 757-774 — the previous
+    // pattern was `innerHTML = '<span>...' + escapeHtml(userValue) + '</span>'`,
+    // which is correct today but is one careless edit away from forgetting
+    // escapeHtml. The safer pattern is DOM construction + textContent so the
+    // browser handles escaping unconditionally.
+    const audit = readFileSync(join(VSCODE_SRC, "audit-panel-provider.ts"), "utf-8");
+    // The two specific rows must use textContent, not innerHTML.
+    expect(audit).toMatch(/sessionVal\.textContent\s*=/);
+    expect(audit).toMatch(/modelVal\.textContent\s*=/);
+    expect(audit).not.toMatch(/sessionRow\.innerHTML\s*=/);
+    expect(audit).not.toMatch(/modelRow\.innerHTML\s*=/);
   });
 
   it("ascend loop tracks commits and reports source-line deltas", () => {
@@ -321,9 +373,10 @@ describe("regression guard — ascend orchestrator wiring", () => {
     // FIX: track commitsMade and totalLinesChanged; differentiate
     // "model isn't editing" (commits == 0) from "edits landed but harsh-scorer
     // can't measure them on this codebase size" (commits > 0).
-    expect(provider).toMatch(/let\s+commitsMade\s*=\s*0/);
-    expect(provider).toMatch(/let\s+totalLinesChanged\s*=\s*0/);
-    expect(provider).toMatch(/commitsMade\+\+/);
-    expect(provider).toMatch(/edits landing|edits landed/);
+    // (After 2026-04-28 extraction these counters live in orchestrator's runAscendLoopCore.)
+    expect(orch).toMatch(/let\s+commitsMade\s*=\s*0/);
+    expect(orch).toMatch(/let\s+totalLinesChanged\s*=\s*0/);
+    expect(orch).toMatch(/commitsMade\+\+/);
+    expect(orch).toMatch(/edits landing|edits landed/);
   });
 });
