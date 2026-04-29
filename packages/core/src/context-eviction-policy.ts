@@ -190,96 +190,93 @@ export interface EvictionOptions {
  * 4. If still over budget: evict STANDARD messages (lowest score first)
  * 5. ESSENTIAL messages are never removed
  */
+interface EvictionAccumulator {
+  scored: ScoredMessage[];
+  totalTokens: number;
+  evictedCount: number;
+  tokensFreed: number;
+}
+
+/** Drop messages of `tier`, lowest-score first, until the running total is at
+ *  or under `targetTokenBudget`. Mutates the accumulator. */
+function evictByTier(
+  acc: EvictionAccumulator,
+  tier: EvictionTier,
+  targetTokenBudget: number,
+): void {
+  if (acc.totalTokens <= targetTokenBudget) return;
+  const candidates = acc.scored
+    .filter((m) => m.tier === tier)
+    .sort((a, b) => a.score - b.score);
+  for (const msg of candidates) {
+    if (acc.totalTokens <= targetTokenBudget) break;
+    const idx = acc.scored.findIndex((s) => s.index === msg.index);
+    if (idx === -1) continue;
+    acc.totalTokens -= acc.scored[idx]!.tokens;
+    acc.tokensFreed += acc.scored[idx]!.tokens;
+    acc.scored.splice(idx, 1);
+    acc.evictedCount++;
+  }
+}
+
+/** Compress oversized standard messages largest-first until at budget. */
+function compressOversizedStandard(
+  acc: EvictionAccumulator,
+  targetTokenBudget: number,
+  compressionMaxTokens: number,
+): void {
+  if (acc.totalTokens <= targetTokenBudget) return;
+  const compressible = acc.scored
+    .filter((m) => m.tier === "standard" && m.tokens > compressionMaxTokens)
+    .sort((a, b) => b.tokens - a.tokens);
+  for (const msg of compressible) {
+    if (acc.totalTokens <= targetTokenBudget) break;
+    const compressed = compressMessageContent(msg.role, msg.content, compressionMaxTokens);
+    const newTokens = estimateTokens(compressed);
+    const saved = msg.tokens - newTokens;
+    if (saved <= 0) continue;
+    acc.totalTokens -= saved;
+    acc.tokensFreed += saved;
+    const idx = acc.scored.findIndex((s) => s.index === msg.index);
+    if (idx !== -1) {
+      acc.scored[idx]!.content = compressed;
+      acc.scored[idx]!.tokens = newTokens;
+    }
+  }
+}
+
 export function evictToFitBudget(
   messages: Array<{ role: MessageRole; content: string }>,
   opts: EvictionOptions,
 ): EvictionResult {
   const { targetTokenBudget, essentialTailCount = 4, preferCompression = true, compressionMaxTokens = 500 } = opts;
 
-  // Score all messages
-  const scored: ScoredMessage[] = messages.map((m, i) => {
-    const tokens = estimateTokens(m.content);
-    const score = scoreMessage(m, i, messages.length);
-    return { ...m, tokens, score, tier: "standard" as EvictionTier, index: i };
-  });
+  const scored: ScoredMessage[] = messages.map((m, i) => ({
+    ...m,
+    tokens: estimateTokens(m.content),
+    score: scoreMessage(m, i, messages.length),
+    tier: "standard" as EvictionTier,
+    index: i,
+  }));
+  for (const sm of scored) sm.tier = assignTier(sm, messages.length, essentialTailCount);
 
-  // Assign tiers
-  for (const sm of scored) {
-    sm.tier = assignTier(sm, messages.length, essentialTailCount);
-  }
+  const acc: EvictionAccumulator = {
+    scored,
+    totalTokens: scored.reduce((sum, m) => sum + m.tokens, 0),
+    evictedCount: 0,
+    tokensFreed: 0,
+  };
 
-  let totalTokens = scored.reduce((sum, m) => sum + m.tokens, 0);
-  let evictedCount = 0;
-  let tokensFreed = 0;
+  evictByTier(acc, "dispensable", targetTokenBudget);
+  if (preferCompression) compressOversizedStandard(acc, targetTokenBudget, compressionMaxTokens);
+  evictByTier(acc, "standard", targetTokenBudget);
 
-  // Phase 1: Evict dispensable messages (lowest score first)
-  if (totalTokens > targetTokenBudget) {
-    const dispensable = scored
-      .filter((m) => m.tier === "dispensable")
-      .sort((a, b) => a.score - b.score);
-
-    for (const msg of dispensable) {
-      if (totalTokens <= targetTokenBudget) break;
-      // Mark as evicted by clearing content
-      const idx = scored.findIndex((s) => s.index === msg.index);
-      if (idx !== -1) {
-        totalTokens -= scored[idx]!.tokens;
-        tokensFreed += scored[idx]!.tokens;
-        scored.splice(idx, 1);
-        evictedCount++;
-      }
-    }
-  }
-
-  // Phase 2: Compress standard messages (largest first)
-  if (preferCompression && totalTokens > targetTokenBudget) {
-    const compressible = scored
-      .filter((m) => m.tier === "standard" && m.tokens > compressionMaxTokens)
-      .sort((a, b) => b.tokens - a.tokens);
-
-    for (const msg of compressible) {
-      if (totalTokens <= targetTokenBudget) break;
-      const compressed = compressMessageContent(msg.role, msg.content, compressionMaxTokens);
-      const newTokens = estimateTokens(compressed);
-      const saved = msg.tokens - newTokens;
-      if (saved > 0) {
-        totalTokens -= saved;
-        tokensFreed += saved;
-        const idx = scored.findIndex((s) => s.index === msg.index);
-        if (idx !== -1) {
-          scored[idx]!.content = compressed;
-          scored[idx]!.tokens = newTokens;
-        }
-      }
-    }
-  }
-
-  // Phase 3: Evict standard messages (lowest score first)
-  if (totalTokens > targetTokenBudget) {
-    const evictableStandard = scored
-      .filter((m) => m.tier === "standard")
-      .sort((a, b) => a.score - b.score);
-
-    for (const msg of evictableStandard) {
-      if (totalTokens <= targetTokenBudget) break;
-      const idx = scored.findIndex((s) => s.index === msg.index);
-      if (idx !== -1) {
-        totalTokens -= scored[idx]!.tokens;
-        tokensFreed += scored[idx]!.tokens;
-        scored.splice(idx, 1);
-        evictedCount++;
-      }
-    }
-  }
-
-  // Re-sort by original index to preserve conversation order
-  scored.sort((a, b) => a.index - b.index);
-
+  acc.scored.sort((a, b) => a.index - b.index);
   return {
-    kept: scored.map((m) => ({ role: m.role, content: m.content })),
-    evictedCount,
-    tokensFreed,
-    tokensRemaining: totalTokens,
+    kept: acc.scored.map((m) => ({ role: m.role, content: m.content })),
+    evictedCount: acc.evictedCount,
+    tokensFreed: acc.tokensFreed,
+    tokensRemaining: acc.totalTokens,
   };
 }
 

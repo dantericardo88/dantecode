@@ -64,94 +64,82 @@ const TSC_ERROR_RE = /^(.+)\((\d+),(\d+)\): error TS(\d+): (.+)$/;
  * @param changedFiles List of file paths that were just modified. May be
  *                     absolute or relative; only TypeScript files are checked.
  */
+const EMPTY_LINT_RESULT: LintCheckResult = {
+  hasErrors: false,
+  errorCount: 0,
+  formattedErrors: "",
+  byFile: new Map(),
+};
+
+function hasAnyTsFile(changedFiles: string[]): boolean {
+  for (const f of changedFiles) {
+    const lower = f.toLowerCase();
+    const dotIdx = lower.lastIndexOf(".");
+    if (dotIdx !== -1 && TS_EXTENSIONS.has(lower.slice(dotIdx))) return true;
+  }
+  return false;
+}
+
+/** Parse the raw tsc output into byFile + flat errorLines. */
+function parseTscErrors(rawOutput: string): { byFile: Map<string, LintFileError[]>; errorLines: string[] } {
+  const byFile = new Map<string, LintFileError[]>();
+  const errorLines: string[] = [];
+
+  for (const line of rawOutput.split(/\r?\n/)) {
+    const match = TSC_ERROR_RE.exec(line);
+    if (!match) continue;
+    const [, file, lineStr, colStr, codeStr, message] = match;
+    if (!file || !lineStr || !colStr || !codeStr || !message) continue;
+    const entry: LintFileError = {
+      file,
+      line: parseInt(lineStr, 10),
+      col: parseInt(colStr, 10),
+      code: parseInt(codeStr, 10),
+      message: message.trim(),
+    };
+    const existing = byFile.get(file);
+    if (existing) existing.push(entry);
+    else byFile.set(file, [entry]);
+    errorLines.push(line);
+  }
+  return { byFile, errorLines };
+}
+
+function formatErrorBlock(errorLines: string[]): string {
+  const cappedLines = errorLines.slice(0, MAX_FORMATTED_LINES);
+  const truncationNote =
+    errorLines.length > MAX_FORMATTED_LINES
+      ? `\n...(${errorLines.length - MAX_FORMATTED_LINES} more errors omitted)`
+      : "";
+  return cappedLines.join("\n") + truncationNote;
+}
+
 export async function runVscodeLintCheck(
   projectRoot: string,
   changedFiles: string[],
 ): Promise<LintCheckResult> {
-  const empty: LintCheckResult = {
-    hasErrors: false,
-    errorCount: 0,
-    formattedErrors: "",
-    byFile: new Map(),
-  };
-
   try {
-    // Step 1 — filter to TS files only
-    const tsFiles = changedFiles.filter((f) => {
-      const lower = f.toLowerCase();
-      const dotIdx = lower.lastIndexOf(".");
-      if (dotIdx === -1) return false;
-      return TS_EXTENSIONS.has(lower.slice(dotIdx));
-    });
+    if (!hasAnyTsFile(changedFiles)) return EMPTY_LINT_RESULT;
 
-    if (tsFiles.length === 0) {
-      return empty;
-    }
-
-    // Step 2-4 — spawn tsc, collect output, enforce timeout
     let rawOutput: string;
     try {
       rawOutput = await spawnTsc(projectRoot);
     } catch (e) {
-      if (e instanceof TscTimeoutError) {
-        return { ...TSC_TIMEOUT_RESULT, byFile: new Map() };
-      }
-      // Unexpected spawn error — return safe empty result
-      return empty;
+      if (e instanceof TscTimeoutError) return { ...TSC_TIMEOUT_RESULT, byFile: new Map() };
+      return EMPTY_LINT_RESULT;
     }
 
-    // Step 5-6 — parse error lines
-    const lines = rawOutput.split(/\r?\n/);
-    const byFile = new Map<string, LintFileError[]>();
-    const errorLines: string[] = [];
+    const { byFile, errorLines } = parseTscErrors(rawOutput);
+    if (errorLines.length === 0) return EMPTY_LINT_RESULT;
 
-    for (const line of lines) {
-      const match = TSC_ERROR_RE.exec(line);
-      if (!match) continue;
-
-      const [, file, lineStr, colStr, codeStr, message] = match;
-      if (!file || !lineStr || !colStr || !codeStr || !message) continue;
-      const entry: LintFileError = {
-        file,
-        line: parseInt(lineStr, 10),
-        col: parseInt(colStr, 10),
-        code: parseInt(codeStr, 10),
-        message: message.trim(),
-      };
-
-      const existing = byFile.get(file);
-      if (existing) {
-        existing.push(entry);
-      } else {
-        byFile.set(file, [entry]);
-      }
-
-      errorLines.push(line);
-    }
-
-    const errorCount = errorLines.length;
-    if (errorCount === 0) {
-      return empty;
-    }
-
-    // Step 7 — build formattedErrors (max 40 lines)
-    const cappedLines = errorLines.slice(0, MAX_FORMATTED_LINES);
-    const truncationNote =
-      errorCount > MAX_FORMATTED_LINES
-        ? `\n...(${errorCount - MAX_FORMATTED_LINES} more errors omitted)`
-        : "";
-    const formattedErrors = cappedLines.join("\n") + truncationNote;
-
-    // Step 8 — return complete result
     return {
       hasErrors: true,
-      errorCount,
-      formattedErrors,
+      errorCount: errorLines.length,
+      formattedErrors: formatErrorBlock(errorLines),
       byFile,
     };
   } catch {
-    // Never throw — return a safe empty result on unexpected failure
-    return empty;
+    return EMPTY_LINT_RESULT;
   }
 }
 
