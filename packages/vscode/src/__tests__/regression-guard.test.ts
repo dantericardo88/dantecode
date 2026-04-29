@@ -309,6 +309,23 @@ describe("regression guard — ascend orchestrator wiring", () => {
     }
   });
 
+  it("SWE-bench Python harness rejects partial patches (Pattern E mitigation)", () => {
+    // Previously fell back to `git apply --reject` when the initial apply
+    // failed, accepting some hunks and dropping others. The verification
+    // surface was silently corrupted — pass-rate numbers from those runs
+    // were meaningless. STRICT mode: retry only with --3way; never accept
+    // partial hunks. If this regresses, every benchmark run with applied
+    // partials becomes unreliable evidence.
+    const py = readFileSync(
+      join(REPO_ROOT, "benchmarks", "swe-bench", "run_swe_bench.py"),
+      "utf-8",
+    );
+    expect(py).toMatch(/STRICT mode/i);
+    expect(py).not.toMatch(/git",\s*"apply",\s*"--reject"/);
+    expect(py).toMatch(/--3way/);
+    expect(py).toMatch(/strict mode, no partial accept/);
+  });
+
   it("SWE-bench runner has per-repo timeout tiers (Pattern D mitigation)", () => {
     // 10 instances of timeout failure in the failure-mode trend. A single
     // 600s default wastes budget on small repos and starves large ones —

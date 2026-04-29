@@ -190,8 +190,17 @@ def setup_environment(instance: dict[str, Any], workspace: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 def apply_patch(patch_text: str, workspace: Path, label: str = "patch") -> bool:
-    """Apply a git diff patch. Returns True on success."""
-    # Write patch to temp file to avoid shell quoting issues
+    """Apply a git diff patch in STRICT mode: all hunks or none.
+
+    Pattern E mitigation (.danteforge/swe-bench-failure-analysis.md): the
+    previous implementation fell back to --reject on first failure, which
+    accepted some hunks and dropped others. The result was a silently
+    corrupted verification surface — pass-rate numbers including these
+    runs were meaningless. We now retry only with --3way (which uses the
+    blob index for safer context resolution) and bail with a clean error
+    if that also fails. Caller treats False as harness_error, distinct
+    from agent-produced patch failures.
+    """
     patch_bytes = patch_text.encode("utf-8")
     result = subprocess.run(
         ["git", "apply", "--whitespace=fix", "-"],
@@ -202,9 +211,12 @@ def apply_patch(patch_text: str, workspace: Path, label: str = "patch") -> bool:
         timeout=30,
     )
     if result.returncode != 0:
-        # Try --reject for partial application
+        # Single safe retry: --3way uses git's blob index to find the
+        # correct base; tolerates trivial context drift but still rejects
+        # the entire patch on real conflicts. NEVER --reject (partial
+        # hunks corrupt the verification surface).
         result = subprocess.run(
-            ["git", "apply", "--reject", "-"],
+            ["git", "apply", "--3way", "-"],
             input=patch_bytes,
             cwd=str(workspace),
             capture_output=True,
@@ -213,9 +225,9 @@ def apply_patch(patch_text: str, workspace: Path, label: str = "patch") -> bool:
         )
         if result.returncode != 0:
             err = result.stderr.decode("utf-8", errors="replace")[:500]
-            print(f"ERROR applying {label}: {err}")
+            print(f"ERROR applying {label} (strict mode, no partial accept): {err}")
             return False
-    print(f"[OK] {label.capitalize()} applied successfully")
+    print(f"[OK] {label.capitalize()} applied successfully (all hunks)")
     return True
 
 
